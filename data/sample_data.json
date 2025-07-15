@@ -1,0 +1,275 @@
+
+db.sales.deleteMany({});
+db.products.deleteMany({});
+db.customers.deleteMany({});
+db.orders.deleteMany({});
+db.user_engagement.deleteMany({});
+db.marketing_campaigns.deleteMany({});
+db.inventory_tracking.deleteMany({});
+
+print("\n=== STARTING DATA INSERTION ===");
+
+// ========================================
+// 2. PRODUCTS COLLECTION (50 Products)
+// ========================================
+db.products.insertMany([
+  // LAPTOPS (10 products)
+  {product_id: "P001", name: "MacBook Pro 14\"", category: "Laptops", subcategory: "Premium Laptops", brand: "Apple", price: 1999.99, cost: 1200.00, stock: 45, rating: 4.8, reviews_count: 324, launch_date: new Date("2023-01-15")},
+  {product_id: "P002", name: "Dell XPS 13", category: "Laptops", subcategory: "Business Laptops", brand: "Dell", price: 1299.99, cost: 800.00, stock: 67, rating: 4.5, reviews_count: 289, launch_date: new Date("2023-02-20")},
+  {product_id: "P003", name: "HP Spectre x360", category: "Laptops", subcategory: "2-in-1 Laptops", brand: "HP", price: 1199.99, cost: 750.00, stock: 34, rating: 4.4, reviews_count: 156, launch_date: new Date("2023-03-10")},
+  {product_id: "P004", name: "Lenovo ThinkPad X1", category: "Laptops", subcategory: "Business Laptops", brand: "Lenovo", price: 1399.99, cost: 850.00, stock: 78, rating: 4.6, reviews_count: 445, launch_date: new Date("2023-04-05")},
+  {product_id: "P005", name: "ASUS ROG Gaming Laptop", category: "Laptops", subcategory: "Gaming Laptops", brand: "ASUS", price: 1599.99, cost: 950.00, stock: 23, rating: 4.7, reviews_count: 234, launch_date: new Date("2023-05-12")},
+  {product_id: "P006", name: "MacBook Air M2", category: "Laptops", subcategory: "Ultrabooks", brand: "Apple", price: 1199.99, cost: 720.00, stock: 89, rating: 4.9, reviews_count: 567, launch_date: new Date("2023-06-18")},
+  {product_id: "P007", name: "Microsoft Surface Laptop", category: "Laptops", subcategory: "2-in-1 Laptops", brand: "Microsoft", price: 999.99, cost: 600.00, stock: 56, rating: 4.3, reviews_count: 178, launch_date: new Date("2023-07-22")},
+  {product_id: "P008", name: "Acer Predator Gaming", category: "Laptops", subcategory: "Gaming Laptops", brand: "Acer", price: 1299.99, cost: 780.00, stock: 34, rating: 4.5, reviews_count: 289, launch_date: new Date("2023-08-15")},
+  {product_id: "P009", name: "Dell Inspiron 15", category: "Laptops", subcategory: "Budget Laptops", brand: "Dell", price: 699.99, cost: 420.00, stock: 123, rating: 4.2, reviews_count: 345, launch_date: new Date("2023-09-10")},
+  {product_id: "P010", name: "HP Pavilion Gaming", category: "Laptops", subcategory: "Gaming Laptops", brand: "HP", price: 899.99, cost: 540.00, stock: 67, rating: 4.4, reviews_count: 198, launch_date: new Date("2023-10-05")},
+  // SMARTPHONES (10 products)
+  {product_id: "P011", name: "iPhone 15 Pro", category: "Smartphones", subcategory: "Premium Phones", brand: "Apple", price: 999.99, cost: 600.00, stock: 123, rating: 4.9, reviews_count: 567, launch_date: new Date("2023-09-15")},
+  {product_id: "P012", name: "Samsung Galaxy S24", category: "Smartphones", subcategory: "Premium Phones", brand: "Samsung", price: 899.99, cost: 550.00, stock: 89, rating: 4.7, reviews_count: 445, launch_date: new Date("2024-01-10")},
+  {product_id: "P013", name: "Google Pixel 8", category: "Smartphones", subcategory: "Premium Phones", brand: "Google", price: 699.99, cost: 420.00, stock: 78, rating: 4.6, reviews_count: 234, launch_date: new Date("2023-10-12")},
+  {product_id: "P014", name: "OnePlus 12", category: "Smartphones", subcategory: "Performance Phones", brand: "OnePlus", price: 799.99, cost: 480.00, stock: 56, rating: 4.5, reviews_count: 178, launch_date: new Date("2024-01-24")},
+  {product_id: "P015", name: "iPhone 14", category: "Smartphones", subcategory: "Mid-Range Phones", brand: "Apple", price: 699.99, cost: 420.00, stock: 134, rating: 4.7, reviews_count: 789, launch_date: new Date("2022-09-16")},
+  {product_id: "P016", name: "Samsung Galaxy A54", category: "Smartphones", subcategory: "Mid-Range Phones", brand: "Samsung", price: 449.99, cost: 270.00, stock: 167, rating: 4.3, reviews_count: 345, launch_date: new Date("2023-03-24")},
+  {product_id: "P017", name: "Xiaomi 13", category: "Smartphones", subcategory: "Budget Phones", brand: "Xiaomi", price: 599.99, cost: 360.00, stock: 89, rating: 4.4, reviews_count: 289, launch_date: new Date("2023-02-26")},
+  {product_id: "P018", name: "Nothing Phone 2", category: "Smartphones", subcategory: "Design Phones", brand: "Nothing", price: 699.99, cost: 420.00, stock: 45, rating: 4.2, reviews_count: 156, launch_date: new Date("2023-07-11")},
+  {product_id: "P019", name: "Motorola Edge 40", category: "Smartphones", subcategory: "Mid-Range Phones", brand: "Motorola", price: 549.99, cost: 330.00, stock: 78, rating: 4.1, reviews_count: 123, launch_date: new Date("2023-05-04")},
+  {product_id: "P020", name: "Oppo Find X6", category: "Smartphones", subcategory: "Camera Phones", brand: "Oppo", price: 849.99, cost: 510.00, stock: 34, rating: 4.5, reviews_count: 198, launch_date: new Date("2023-03-21")},
+  // AUDIO DEVICES (10 products)
+  {product_id: "P021", name: "AirPods Pro 2", category: "Audio", subcategory: "Wireless Earbuds", brand: "Apple", price: 249.99, cost: 120.00, stock: 234, rating: 4.6, reviews_count: 789, launch_date: new Date("2022-09-23")},
+  {product_id: "P022", name: "Sony WH-1000XM5", category: "Audio", subcategory: "Headphones", brand: "Sony", price: 399.99, cost: 200.00, stock: 156, rating: 4.8, reviews_count: 234, launch_date: new Date("2022-05-12")},
+  {product_id: "P023", name: "Bose QuietComfort 45", category: "Audio", subcategory: "Headphones", brand: "Bose", price: 329.99, cost: 165.00, stock: 89, rating: 4.7, reviews_count: 345, launch_date: new Date("2021-09-23")},
+  {product_id: "P024", name: "Samsung Galaxy Buds2 Pro", category: "Audio", subcategory: "Wireless Earbuds", brand: "Samsung", price: 229.99, cost: 115.00, stock: 178, rating: 4.4, reviews_count: 289, launch_date: new Date("2022-08-26")},
+  {product_id: "P025", name: "Sennheiser Momentum 4", category: "Audio", subcategory: "Headphones", brand: "Sennheiser", price: 349.99, cost: 175.00, stock: 67, rating: 4.5, reviews_count: 156, launch_date: new Date("2022-08-09")},
+  {product_id: "P026", name: "JBL Tune 760NC", category: "Audio", subcategory: "Budget Headphones", brand: "JBL", price: 129.99, cost: 65.00, stock: 234, rating: 4.2, reviews_count: 567, launch_date: new Date("2021-04-15")},
+  {product_id: "P027", name: "Audio-Technica ATH-M50x", category: "Audio", subcategory: "Studio Headphones", brand: "Audio-Technica", price: 149.99, cost: 75.00, stock: 145, rating: 4.6, reviews_count: 234, launch_date: new Date("2014-01-01")},
+  {product_id: "P028", name: "Beats Studio3", category: "Audio", subcategory: "Lifestyle Headphones", brand: "Beats", price: 199.99, cost: 100.00, stock: 123, rating: 4.3, reviews_count: 345, launch_date: new Date("2017-10-01")},
+  {product_id: "P029", name: "Jabra Elite 85t", category: "Audio", subcategory: "Business Earbuds", brand: "Jabra", price: 179.99, cost: 90.00, stock: 89, rating: 4.4, reviews_count: 198, launch_date: new Date("2020-10-01")},
+  {product_id: "P030", name: "Sony WF-1000XM4", category: "Audio", subcategory: "Premium Earbuds", brand: "Sony", price: 279.99, cost: 140.00, stock: 78, rating: 4.7, reviews_count: 289, launch_date: new Date("2021-06-09")},
+  // TABLETS (5 products)
+  {product_id: "P031", name: "iPad Pro 12.9\"", category: "Tablets", subcategory: "Premium Tablets", brand: "Apple", price: 1099.99, cost: 650.00, stock: 78, rating: 4.7, reviews_count: 456, launch_date: new Date("2023-10-25")},
+  {product_id: "P032", name: "Samsung Galaxy Tab S9", category: "Tablets", subcategory: "Android Tablets", brand: "Samsung", price: 799.99, cost: 480.00, stock: 56, rating: 4.5, reviews_count: 234, launch_date: new Date("2023-07-26")},
+  {product_id: "P033", name: "iPad Air", category: "Tablets", subcategory: "Mid-Range Tablets", brand: "Apple", price: 599.99, cost: 360.00, stock: 123, rating: 4.6, reviews_count: 345, launch_date: new Date("2022-03-18")},
+  {product_id: "P034", name: "Microsoft Surface Pro 9", category: "Tablets", subcategory: "2-in-1 Tablets", brand: "Microsoft", price: 999.99, cost: 600.00, stock: 45, rating: 4.4, reviews_count: 178, launch_date: new Date("2022-10-05")},
+  {product_id: "P035", name: "Amazon Fire HD 10", category: "Tablets", subcategory: "Budget Tablets", brand: "Amazon", price: 149.99, cost: 75.00, stock: 234, rating: 4.1, reviews_count: 567, launch_date: new Date("2021-05-26")},
+  // ACCESSORIES (10 products)
+  {product_id: "P036", name: "Magic Mouse", category: "Accessories", subcategory: "Input Devices", brand: "Apple", price: 79.99, cost: 35.00, stock: 345, rating: 4.2, reviews_count: 234, launch_date: new Date("2021-04-20")},
+  {product_id: "P037", name: "Mechanical Keyboard RGB", category: "Accessories", subcategory: "Input Devices", brand: "Razer", price: 149.99, cost: 70.00, stock: 189, rating: 4.5, reviews_count: 567, launch_date: new Date("2023-03-10")},
+  {product_id: "P038", name: "Logitech MX Master 3", category: "Accessories", subcategory: "Input Devices", brand: "Logitech", price: 99.99, cost: 50.00, stock: 234, rating: 4.7, reviews_count: 789, launch_date: new Date("2019-09-26")},
+  {product_id: "P039", name: "USB-C Hub 7-in-1", category: "Accessories", subcategory: "Connectivity", brand: "Anker", price: 59.99, cost: 30.00, stock: 456, rating: 4.4, reviews_count: 345, launch_date: new Date("2022-01-15")},
+  {product_id: "P040", name: "Wireless Charging Pad", category: "Accessories", subcategory: "Charging", brand: "Belkin", price: 39.99, cost: 20.00, stock: 567, rating: 4.3, reviews_count: 234, launch_date: new Date("2020-03-01")},
+  {product_id: "P041", name: "MacBook Stand Aluminum", category: "Accessories", subcategory: "Stands", brand: "Rain Design", price: 89.99, cost: 45.00, stock: 178, rating: 4.6, reviews_count: 156, launch_date: new Date("2021-06-01")},
+  {product_id: "P042", name: "Phone Case iPhone 15", category: "Accessories", subcategory: "Phone Cases", brand: "Otterbox", price: 49.99, cost: 25.00, stock: 789, rating: 4.5, reviews_count: 567, launch_date: new Date("2023-09-22")},
+  {product_id: "P043", name: "Power Bank 20000mAh", category: "Accessories", subcategory: "Charging", brand: "Anker", price: 69.99, cost: 35.00, stock: 345, rating: 4.7, reviews_count: 445, launch_date: new Date("2022-05-10")},
+  {product_id: "P044", name: "Blue Light Glasses", category: "Accessories", subcategory: "Health", brand: "Felix Gray", price: 95.99, cost: 48.00, stock: 234, rating: 4.2, reviews_count: 178, launch_date: new Date("2020-01-01")},
+  {product_id: "P045", name: "Webcam 4K", category: "Accessories", subcategory: "Video", brand: "Logitech", price: 199.99, cost: 100.00, stock: 123, rating: 4.6, reviews_count: 289, launch_date: new Date("2021-03-15")},
+  // MONITORS (5 products)
+  {product_id: "P046", name: "4K Monitor 27\"", category: "Monitors", subcategory: "4K Monitors", brand: "LG", price: 599.99, cost: 350.00, stock: 89, rating: 4.6, reviews_count: 123, launch_date: new Date("2023-06-15")},
+  {product_id: "P047", name: "Gaming Monitor 144Hz", category: "Monitors", subcategory: "Gaming Monitors", brand: "ASUS", price: 399.99, cost: 240.00, stock: 67, rating: 4.7, reviews_count: 234, launch_date: new Date("2023-04-20")},
+  {product_id: "P048", name: "Ultrawide Monitor 34\"", category: "Monitors", subcategory: "Ultrawide Monitors", brand: "Samsung", price: 799.99, cost: 480.00, stock: 34, rating: 4.5, reviews_count: 156, launch_date: new Date("2023-08-10")},
+  {product_id: "P049", name: "Budget Monitor 24\"", category: "Monitors", subcategory: "Budget Monitors", brand: "Acer", price: 199.99, cost: 120.00, stock: 178, rating: 4.2, reviews_count: 345, launch_date: new Date("2022-11-01")},
+  {product_id: "P050", name: "Professional Monitor 32\"", category: "Monitors", subcategory: "Professional Monitors", brand: "Dell", price: 899.99, cost: 540.00, stock: 45, rating: 4.8, reviews_count: 89, launch_date: new Date("2023-05-15")}
+]);
+print("✓ Products inserted successfully");
+
+// ========================================
+// 3. CUSTOMERS COLLECTION (25 Customers)
+// ========================================
+db.customers.insertMany([
+  // North America (10 customers)
+  {customer_id: "C001", name: "John Smith", email: "john.smith@email.com", age: 34, gender: "Male", country: "USA", state: "California", city: "San Francisco", customer_segment: "Premium", signup_date: new Date("2023-01-15"), total_spent: 8678.45, order_count: 15, last_purchase: new Date("2024-06-15")},
+  {customer_id: "C002", name: "Sarah Johnson", email: "sarah.j@email.com", age: 28, gender: "Female", country: "USA", state: "New York", city: "New York", customer_segment: "Regular", signup_date: new Date("2023-03-22"), total_spent: 3340.67, order_count: 12, last_purchase: new Date("2024-06-20")},
+  {customer_id: "C003", name: "Mike Davis", email: "mike.davis@email.com", age: 42, gender: "Male", country: "Canada", state: "Ontario", city: "Toronto", customer_segment: "Premium", signup_date: new Date("2022-11-10"), total_spent: 12901.23, order_count: 22, last_purchase: new Date("2024-07-01")},
+  {customer_id: "C004", name: "Lisa Chen", email: "lisa.chen@email.com", age: 31, gender: "Female", country: "USA", state: "Washington", city: "Seattle", customer_segment: "Regular", signup_date: new Date("2023-04-12"), total_spent: 2890.45, order_count: 9, last_purchase: new Date("2024-06-28")},
+  {customer_id: "C005", name: "Robert Brown", email: "robert.b@email.com", age: 39, gender: "Male", country: "USA", state: "Texas", city: "Austin", customer_segment: "Premium", signup_date: new Date("2023-02-08"), total_spent: 7543.21, order_count: 18, last_purchase: new Date("2024-07-05")},
+  {customer_id: "C006", name: "Jennifer Wilson", email: "jen.wilson@email.com", age: 26, gender: "Female", country: "Canada", state: "British Columbia", city: "Vancouver", customer_segment: "Regular", signup_date: new Date("2023-06-15"), total_spent: 1890.67, order_count: 7, last_purchase: new Date("2024-06-12")},
+  {customer_id: "C007", name: "David Miller", email: "david.m@email.com", age: 45, gender: "Male", country: "USA", state: "Florida", city: "Miami", customer_segment: "VIP", signup_date: new Date("2022-08-20"), total_spent: 15678.90, order_count: 28, last_purchase: new Date("2024-07-08")},
+  {customer_id: "C008", name: "Amanda Garcia", email: "amanda.g@email.com", age: 33, gender: "Female", country: "USA", state: "Colorado", city: "Denver", customer_segment: "Regular", signup_date: new Date("2023-05-30"), total_spent: 2567.34, order_count: 8, last_purchase: new Date("2024-06-25")},
+  {customer_id: "C009", name: "Kevin Taylor", email: "kevin.t@email.com", age: 37, gender: "Male", country: "Canada", state: "Quebec", city: "Montreal", customer_segment: "Premium", signup_date: new Date("2023-01-25"), total_spent: 6789.12, order_count: 16, last_purchase: new Date("2024-07-02")},
+  {customer_id: "C010", name: "Rachel Martinez", email: "rachel.m@email.com", age: 29, gender: "Female", country: "USA", state: "Arizona", city: "Phoenix", customer_segment: "Regular", signup_date: new Date("2023-07-10"), total_spent: 1234.56, order_count: 5, last_purchase: new Date("2024-06-18")},
+  // Europe (8 customers)
+  {customer_id: "C011", name: "Emma Wilson", email: "emma.w@email.com", age: 31, gender: "Female", country: "UK", state: "England", city: "London", customer_segment: "Regular", signup_date: new Date("2023-05-18"), total_spent: 3890.45, order_count: 11, last_purchase: new Date("2024-06-28")},
+  {customer_id: "C012", name: "Lucas Mueller", email: "lucas.m@email.com", age: 35, gender: "Male", country: "Germany", state: "Bavaria", city: "Munich", customer_segment: "Premium", signup_date: new Date("2023-02-14"), total_spent: 8543.21, order_count: 19, last_purchase: new Date("2024-07-05")},
+  {customer_id: "C013", name: "Sophie Dubois", email: "sophie.d@email.com", age: 27, gender: "Female", country: "France", state: "Ile-de-France", city: "Paris", customer_segment: "Regular", signup_date: new Date("2023-04-22"), total_spent: 2678.90, order_count: 9, last_purchase: new Date("2024-06-30")},
+  {customer_id: "C014", name: "Marco Rossi", email: "marco.r@email.com", age: 41, gender: "Male", country: "Italy", state: "Lombardy", city: "Milan", customer_segment: "Premium", signup_date: new Date("2022-12-05"), total_spent: 9876.54, order_count: 21, last_purchase: new Date("2024-07-03")},
+  {customer_id: "C015", name: "Olga Petrov", email: "olga.p@email.com", age: 30, gender: "Female", country: "Spain", state: "Madrid", city: "Madrid", customer_segment: "Regular", signup_date: new Date("2023-06-08"), total_spent: 2345.67, order_count: 8, last_purchase: new Date("2024-06-22")},
+  {customer_id: "C016", name: "Henrik Nielsen", email: "henrik.n@email.com", age: 38, gender: "Male", country: "Denmark", state: "Capital Region", city: "Copenhagen", customer_segment: "Premium", signup_date: new Date("2023-03-12"), total_spent: 7234.89, order_count: 17, last_purchase: new Date("2024-07-01")},
+  {customer_id: "C017", name: "Anna Kowalski", email: "anna.k@email.com", age: 32, gender: "Female", country: "Poland", state: "Masovian", city: "Warsaw", customer_segment: "Regular", signup_date: new Date("2023-08-15"), total_spent: 1567.23, order_count: 6, last_purchase: new Date("2024-06-20")},
+  {customer_id: "C018", name: "Carlos Silva", email: "carlos.s@email.com", age: 36, gender: "Male", country: "Portugal", state: "Lisbon", city: "Lisbon", customer_segment: "Premium", signup_date: new Date("2023-01-30"), total_spent: 6789.45, order_count: 15, last_purchase: new Date("2024-06-28")},
+  // Asia-Pacific (7 customers)
+  {customer_id: "C019", name: "David Chen", email: "david.chen@email.com", age: 29, gender: "Male", country: "Australia", state: "NSW", city: "Sydney", customer_segment: "Premium", signup_date: new Date("2023-02-14"), total_spent: 9543.21, order_count: 20, last_purchase: new Date("2024-07-05")},
+  {customer_id: "C020", name: "Yuki Tanaka", email: "yuki.t@email.com", age: 25, gender: "Female", country: "Japan", state: "Tokyo", city: "Tokyo", customer_segment: "Regular", signup_date: new Date("2023-07-20"), total_spent: 3456.78, order_count: 10, last_purchase: new Date("2024-06-26")},
+  {customer_id: "C021", name: "Kim Min-jun", email: "kim.mj@email.com", age: 33, gender: "Male", country: "South Korea", state: "Seoul", city: "Seoul", customer_segment: "Premium", signup_date: new Date("2023-04-18"), total_spent: 8234.56, order_count: 18, last_purchase: new Date("2024-07-04")},
+  {customer_id: "C022", name: "Priya Sharma", email: "priya.s@email.com", age: 28, gender: "Female", country: "India", state: "Maharashtra", city: "Mumbai", customer_segment: "Regular", signup_date: new Date("2023-05-25"), total_spent: 2789.34, order_count: 9, last_purchase: new Date("2024-06-29")},
+  {customer_id: "C023", name: "Li Wei", email: "li.wei@email.com", age: 34, gender: "Male", country: "Singapore", state: "Singapore", city: "Singapore", customer_segment: "VIP", signup_date: new Date("2022-10-12"), total_spent: 13456.78, order_count: 25, last_purchase: new Date("2024-07-06")},
+  {customer_id: "C024", name: "Sarah O'Connor", email: "sarah.o@email.com", age: 31, gender: "Female", country: "New Zealand", state: "Auckland", city: "Auckland", customer_segment: "Regular", signup_date: new Date("2023-06-30"), total_spent: 2123.45, order_count: 7, last_purchase: new Date("2024-06-24")},
+  {customer_id: "C025", name: "Raj Patel", email: "raj.p@email.com", age: 40, gender: "Male", country: "India", state: "Gujarat", city: "Ahmedabad", customer_segment: "Premium", signup_date: new Date("2023-03-08"), total_spent: 7891.23, order_count: 16, last_purchase: new Date("2024-07-07")}
+]);
+print("✓ Customers inserted successfully");
+
+// ========================================
+// 4. SALES COLLECTION (70 Transactions)
+// ========================================
+db.sales.insertMany([
+  // January 2024 (10 transactions)
+  {order_id: "ORD001", customer_id: "C001", product_id: "P001", product_name: "MacBook Pro 14\"", category: "Laptops", quantity: 1, unit_price: 1999.99, total_amount: 1999.99, discount: 0, date: new Date("2024-01-02"), month: "January", quarter: "Q1", sales_rep: "Alice Cooper", region: "North America"},
+  {order_id: "ORD002", customer_id: "C002", product_id: "P011", product_name: "iPhone 15 Pro", category: "Smartphones", quantity: 1, unit_price: 999.99, total_amount: 999.99, discount: 50.00, date: new Date("2024-01-03"), month: "January", quarter: "Q1", sales_rep: "Bob Martin", region: "North America"},
+  {order_id: "ORD003", customer_id: "C011", product_id: "P022", product_name: "Sony WH-1000XM5", category: "Audio", quantity: 1, unit_price: 399.99, total_amount: 399.99, discount: 0, date: new Date("2024-01-05"), month: "January", quarter: "Q1", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD004", customer_id: "C019", product_id: "P031", product_name: "iPad Pro 12.9\"", category: "Tablets", quantity: 1, unit_price: 1099.99, total_amount: 1099.99, discount: 0, date: new Date("2024-01-07"), month: "January", quarter: "Q1", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD005", customer_id: "C003", product_id: "P021", product_name: "AirPods Pro 2", category: "Audio", quantity: 2, unit_price: 249.99, total_amount: 499.98, discount: 25.00, date: new Date("2024-01-08"), month: "January", quarter: "Q1", sales_rep: "Charlie Brown", region: "North America"},
+  {order_id: "ORD006", customer_id: "C012", product_id: "P002", product_name: "Dell XPS 13", category: "Laptops", quantity: 1, unit_price: 1299.99, total_amount: 1299.99, discount: 0, date: new Date("2024-01-10"), month: "January", quarter: "Q1", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD007", customer_id: "C005", product_id: "P037", product_name: "Mechanical Keyboard RGB", category: "Accessories", quantity: 1, unit_price: 149.99, total_amount: 149.99, discount: 0, date: new Date("2024-01-12"), month: "January", quarter: "Q1", sales_rep: "Alice Cooper", region: "North America"},
+  {order_id: "ORD008", customer_id: "C020", product_id: "P013", product_name: "Google Pixel 8", category: "Smartphones", quantity: 1, unit_price: 699.99, total_amount: 699.99, discount: 0, date: new Date("2024-01-15"), month: "January", quarter: "Q1", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD009", customer_id: "C007", product_id: "P046", product_name: "4K Monitor 27\"", category: "Monitors", quantity: 2, unit_price: 599.99, total_amount: 1199.98, discount: 100.00, date: new Date("2024-01-18"), month: "January", quarter: "Q1", sales_rep: "Bob Martin", region: "North America"},
+  {order_id: "ORD010", customer_id: "C014", product_id: "P023", product_name: "Bose QuietComfort 45", category: "Audio", quantity: 1, unit_price: 329.99, total_amount: 329.99, discount: 0, date: new Date("2024-01-20"), month: "January", quarter: "Q1", sales_rep: "Diana Prince", region: "Europe"},
+  // February 2024 (10 transactions)
+  {order_id: "ORD011", customer_id: "C004", product_id: "P036", product_name: "Magic Mouse", category: "Accessories", quantity: 3, unit_price: 79.99, total_amount: 239.97, discount: 0, date: new Date("2024-02-02"), month: "February", quarter: "Q1", sales_rep: "Alice Cooper", region: "North America"},
+  {order_id: "ORD012", customer_id: "C021", product_id: "P012", product_name: "Samsung Galaxy S24", category: "Smartphones", quantity: 1, unit_price: 899.99, total_amount: 899.99, discount: 45.00, date: new Date("2024-02-04"), month: "February", quarter: "Q1", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD013", customer_id: "C009", product_id: "P038", product_name: "Logitech MX Master 3", category: "Accessories", quantity: 2, unit_price: 99.99, total_amount: 199.98, discount: 0, date: new Date("2024-02-06"), month: "February", quarter: "Q1", sales_rep: "Charlie Brown", region: "North America"},
+  {order_id: "ORD014", customer_id: "C013", product_id: "P032", product_name: "Samsung Galaxy Tab S9", category: "Tablets", quantity: 1, unit_price: 799.99, total_amount: 799.99, discount: 0, date: new Date("2024-02-08"), month: "February", quarter: "Q1", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD015", customer_id: "C023", product_id: "P047", product_name: "Gaming Monitor 144Hz", category: "Monitors", quantity: 1, unit_price: 399.99, total_amount: 399.99, discount: 0, date: new Date("2024-02-10"), month: "February", quarter: "Q1", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD016", customer_id: "C001", product_id: "P024", product_name: "Samsung Galaxy Buds2 Pro", category: "Audio", quantity: 1, unit_price: 229.99, total_amount: 229.99, discount: 0, date: new Date("2024-02-12"), month: "February", quarter: "Q1", sales_rep: "Alice Cooper", region: "North America"},
+  {order_id: "ORD017", customer_id: "C015", product_id: "P003", product_name: "HP Spectre x360", category: "Laptops", quantity: 1, unit_price: 1199.99, total_amount: 1199.99, discount: 60.00, date: new Date("2024-02-14"), month: "February", quarter: "Q1", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD018", customer_id: "C006", product_id: "P039", product_name: "USB-C Hub 7-in-1", category: "Accessories", quantity: 2, unit_price: 59.99, total_amount: 119.98, discount: 0, date: new Date("2024-02-16"), month: "February", quarter: "Q1", sales_rep: "Charlie Brown", region: "North America"},
+  {order_id: "ORD019", customer_id: "C022", product_id: "P016", product_name: "Samsung Galaxy A54", category: "Smartphones", quantity: 2, unit_price: 449.99, total_amount: 899.98, discount: 50.00, date: new Date("2024-02-18"), month: "February", quarter: "Q1", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD020", customer_id: "C012", product_id: "P025", product_name: "Sennheiser Momentum 4", category: "Audio", quantity: 1, unit_price: 349.99, total_amount: 349.99, discount: 0, date: new Date("2024-02-20"), month: "February", quarter: "Q1", sales_rep: "Diana Prince", region: "Europe"},
+  // March 2024 (10 transactions)
+  {order_id: "ORD021", customer_id: "C008", product_id: "P040", product_name: "Wireless Charging Pad", category: "Accessories", quantity: 4, unit_price: 39.99, total_amount: 159.96, discount: 0, date: new Date("2024-03-02"), month: "March", quarter: "Q1", sales_rep: "Bob Martin", region: "North America"},
+  {order_id: "ORD022", customer_id: "C016", product_id: "P004", product_name: "Lenovo ThinkPad X1", category: "Laptops", quantity: 1, unit_price: 1399.99, total_amount: 1399.99, discount: 0, date: new Date("2024-03-04"), month: "March", quarter: "Q1", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD023", customer_id: "C019", product_id: "P014", product_name: "OnePlus 12", category: "Smartphones", quantity: 1, unit_price: 799.99, total_amount: 799.99, discount: 40.00, date: new Date("2024-03-06"), month: "March", quarter: "Q1", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD024", customer_id: "C003", product_id: "P041", product_name: "MacBook Stand Aluminum", category: "Accessories", quantity: 1, unit_price: 89.99, total_amount: 89.99, discount: 0, date: new Date("2024-03-08"), month: "March", quarter: "Q1", sales_rep: "Charlie Brown", region: "North America"},
+  {order_id: "ORD025", customer_id: "C025", product_id: "P033", product_name: "iPad Air", category: "Tablets", quantity: 1, unit_price: 599.99, total_amount: 599.99, discount: 30.00, date: new Date("2024-03-10"), month: "March", quarter: "Q1", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD026", customer_id: "C017", product_id: "P026", product_name: "JBL Tune 760NC", category: "Audio", quantity: 2, unit_price: 129.99, total_amount: 259.98, discount: 0, date: new Date("2024-03-12"), month: "March", quarter: "Q1", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD027", customer_id: "C010", product_id: "P042", product_name: "Phone Case iPhone 15", category: "Accessories", quantity: 3, unit_price: 49.99, total_amount: 149.97, discount: 0, date: new Date("2024-03-14"), month: "March", quarter: "Q1", sales_rep: "Bob Martin", region: "North America"},
+  {order_id: "ORD028", customer_id: "C018", product_id: "P048", product_name: "Ultrawide Monitor 34\"", category: "Monitors", quantity: 1, unit_price: 799.99, total_amount: 799.99, discount: 80.00, date: new Date("2024-03-16"), month: "March", quarter: "Q1", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD029", customer_id: "C024", product_id: "P017", product_name: "Xiaomi 13", category: "Smartphones", quantity: 1, unit_price: 599.99, total_amount: 599.99, discount: 0, date: new Date("2024-03-18"), month: "March", quarter: "Q1", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD030", customer_id: "C007", product_id: "P005", product_name: "ASUS ROG Gaming Laptop", category: "Laptops", quantity: 1, unit_price: 1599.99, total_amount: 1599.99, discount: 100.00, date: new Date("2024-03-20"), month: "March", quarter: "Q1", sales_rep: "Bob Martin", region: "North America"},
+  // April 2024 (10 transactions)
+  {order_id: "ORD031", customer_id: "C002", product_id: "P043", product_name: "Power Bank 20000mAh", category: "Accessories", quantity: 2, unit_price: 69.99, total_amount: 139.98, discount: 0, date: new Date("2024-04-02"), month: "April", quarter: "Q2", sales_rep: "Alice Cooper", region: "North America"},
+  {order_id: "ORD032", customer_id: "C011", product_id: "P027", product_name: "Audio-Technica ATH-M50x", category: "Audio", quantity: 1, unit_price: 149.99, total_amount: 149.99, discount: 0, date: new Date("2024-04-04"), month: "April", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD033", customer_id: "C020", product_id: "P034", product_name: "Microsoft Surface Pro 9", category: "Tablets", quantity: 1, unit_price: 999.99, total_amount: 999.99, discount: 50.00, date: new Date("2024-04-06"), month: "April", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD034", customer_id: "C014", product_id: "P006", product_name: "MacBook Air M2", category: "Laptops", quantity: 1, unit_price: 1199.99, total_amount: 1199.99, discount: 0, date: new Date("2024-04-08"), month: "April", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD035", customer_id: "C005", product_id: "P028", product_name: "Beats Studio3", category: "Audio", quantity: 1, unit_price: 199.99, total_amount: 199.99, discount: 20.00, date: new Date("2024-04-10"), month: "April", quarter: "Q2", sales_rep: "Alice Cooper", region: "North America"},
+  {order_id: "ORD036", customer_id: "C021", product_id: "P044", product_name: "Blue Light Glasses", category: "Accessories", quantity: 2, unit_price: 95.99, total_amount: 191.98, discount: 0, date: new Date("2024-04-12"), month: "April", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD037", customer_id: "C009", product_id: "P015", product_name: "iPhone 14", category: "Smartphones", quantity: 1, unit_price: 699.99, total_amount: 699.99, discount: 35.00, date: new Date("2024-04-14"), month: "April", quarter: "Q2", sales_rep: "Charlie Brown", region: "North America"},
+  {order_id: "ORD038", customer_id: "C013", product_id: "P049", product_name: "Budget Monitor 24\"", category: "Monitors", quantity: 2, unit_price: 199.99, total_amount: 399.98, discount: 0, date: new Date("2024-04-16"), month: "April", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD039", customer_id: "C023", product_id: "P007", product_name: "Microsoft Surface Laptop", category: "Laptops", quantity: 1, unit_price: 999.99, total_amount: 999.99, discount: 0, date: new Date("2024-04-18"), month: "April", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD040", customer_id: "C004", product_id: "P029", product_name: "Jabra Elite 85t", category: "Audio", quantity: 1, unit_price: 179.99, total_amount: 179.99, discount: 0, date: new Date("2024-04-20"), month: "April", quarter: "Q2", sales_rep: "Alice Cooper", region: "North America"},
+  // May 2024 (10 transactions)
+  {order_id: "ORD041", customer_id: "C016", product_id: "P045", product_name: "Webcam 4K", category: "Accessories", quantity: 1, unit_price: 199.99, total_amount: 199.99, discount: 0, date: new Date("2024-05-02"), month: "May", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD042", customer_id: "C008", product_id: "P018", product_name: "Nothing Phone 2", category: "Smartphones", quantity: 1, unit_price: 699.99, total_amount: 699.99, discount: 35.00, date: new Date("2024-05-04"), month: "May", quarter: "Q2", sales_rep: "Bob Martin", region: "North America"},
+  {order_id: "ORD043", customer_id: "C022", product_id: "P035", product_name: "Amazon Fire HD 10", category: "Tablets", quantity: 3, unit_price: 149.99, total_amount: 449.97, discount: 22.50, date: new Date("2024-05-06"), month: "May", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD044", customer_id: "C012", product_id: "P030", product_name: "Sony WF-1000XM4", category: "Audio", quantity: 1, unit_price: 279.99, total_amount: 279.99, discount: 0, date: new Date("2024-05-08"), month: "May", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD045", customer_id: "C025", product_id: "P008", product_name: "Acer Predator Gaming", category: "Laptops", quantity: 1, unit_price: 1299.99, total_amount: 1299.99, discount: 65.00, date: new Date("2024-05-10"), month: "May", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD046", customer_id: "C001", product_id: "P050", product_name: "Professional Monitor 32\"", category: "Monitors", quantity: 1, unit_price: 899.99, total_amount: 899.99, discount: 0, date: new Date("2024-05-12"), month: "May", quarter: "Q2", sales_rep: "Alice Cooper", region: "North America"},
+  {order_id: "ORD047", customer_id: "C015", product_id: "P019", product_name: "Motorola Edge 40", category: "Smartphones", quantity: 2, unit_price: 549.99, total_amount: 1099.98, discount: 55.00, date: new Date("2024-05-14"), month: "May", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD048", customer_id: "C017", product_id: "P009", product_name: "Dell Inspiron 15", category: "Laptops", quantity: 1, unit_price: 699.99, total_amount: 699.99, discount: 0, date: new Date("2024-05-16"), month: "May", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD049", customer_id: "C006", product_id: "P036", product_name: "Magic Mouse", category: "Accessories", quantity: 2, unit_price: 79.99, total_amount: 159.98, discount: 0, date: new Date("2024-05-18"), month: "May", quarter: "Q2", sales_rep: "Charlie Brown", region: "North America"},
+  {order_id: "ORD050", customer_id: "C024", product_id: "P020", product_name: "Oppo Find X6", category: "Smartphones", quantity: 1, unit_price: 849.99, total_amount: 849.99, discount: 42.50, date: new Date("2024-05-20"), month: "May", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  // June 2024 (20 transactions)
+  {order_id: "ORD051", customer_id: "C007", product_id: "P010", product_name: "HP Pavilion Gaming", category: "Laptops", quantity: 1, unit_price: 899.99, total_amount: 899.99, discount: 45.00, date: new Date("2024-06-02"), month: "June", quarter: "Q2", sales_rep: "Bob Martin", region: "North America"},
+  {order_id: "ORD052", customer_id: "C018", product_id: "P021", product_name: "AirPods Pro 2", category: "Audio", quantity: 2, unit_price: 249.99, total_amount: 499.98, discount: 25.00, date: new Date("2024-06-04"), month: "June", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD053", customer_id: "C019", product_id: "P037", product_name: "Mechanical Keyboard RGB", category: "Accessories", quantity: 1, unit_price: 149.99, total_amount: 149.99, discount: 0, date: new Date("2024-06-06"), month: "June", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD054", customer_id: "C011", product_id: "P011", product_name: "iPhone 15 Pro", category: "Smartphones", quantity: 1, unit_price: 999.99, total_amount: 999.99, discount: 50.00, date: new Date("2024-06-08"), month: "June", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD055", customer_id: "C003", product_id: "P047", product_name: "Gaming Monitor 144Hz", category: "Monitors", quantity: 1, unit_price: 399.99, total_amount: 399.99, discount: 0, date: new Date("2024-06-10"), month: "June", quarter: "Q2", sales_rep: "Charlie Brown", region: "North America"},
+  {order_id: "ORD056", customer_id: "C020", product_id: "P038", product_name: "Logitech MX Master 3", category: "Accessories", quantity: 3, unit_price: 99.99, total_amount: 299.97, discount: 15.00, date: new Date("2024-06-12"), month: "June", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD057", customer_id: "C014", product_id: "P022", product_name: "Sony WH-1000XM5", category: "Audio", quantity: 1, unit_price: 399.99, total_amount: 399.99, discount: 0, date: new Date("2024-06-14"), month: "June", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD058", customer_id: "C002", product_id: "P031", product_name: "iPad Pro 12.9\"", category: "Tablets", quantity: 1, unit_price: 1099.99, total_amount: 1099.99, discount: 55.00, date: new Date("2024-06-16"), month: "June", quarter: "Q2", sales_rep: "Alice Cooper", region: "North America"},
+  {order_id: "ORD059", customer_id: "C021", product_id: "P039", product_name: "USB-C Hub 7-in-1", category: "Accessories", quantity: 2, unit_price: 59.99, total_amount: 119.98, discount: 0, date: new Date("2024-06-18"), month: "June", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD060", customer_id: "C012", product_id: "P012", product_name: "Samsung Galaxy S24", category: "Smartphones", quantity: 1, unit_price: 899.99, total_amount: 899.99, discount: 45.00, date: new Date("2024-06-20"), month: "June", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD061", customer_id: "C009", product_id: "P046", product_name: "4K Monitor 27\"", category: "Monitors", quantity: 1, unit_price: 599.99, total_amount: 599.99, discount: 30.00, date: new Date("2024-06-22"), month: "June", quarter: "Q2", sales_rep: "Charlie Brown", region: "North America"},
+  {order_id: "ORD062", customer_id: "C016", product_id: "P023", product_name: "Bose QuietComfort 45", category: "Audio", quantity: 1, unit_price: 329.99, total_amount: 329.99, discount: 0, date: new Date("2024-06-24"), month: "June", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD063", customer_id: "C023", product_id: "P040", product_name: "Wireless Charging Pad", category: "Accessories", quantity: 5, unit_price: 39.99, total_amount: 199.95, discount: 10.00, date: new Date("2024-06-26"), month: "June", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD064", customer_id: "C005", product_id: "P032", product_name: "Samsung Galaxy Tab S9", category: "Tablets", quantity: 1, unit_price: 799.99, total_amount: 799.99, discount: 40.00, date: new Date("2024-06-28"), month: "June", quarter: "Q2", sales_rep: "Alice Cooper", region: "North America"},
+  {order_id: "ORD065", customer_id: "C025", product_id: "P013", product_name: "Google Pixel 8", category: "Smartphones", quantity: 1, unit_price: 699.99, total_amount: 699.99, discount: 35.00, date: new Date("2024-06-30"), month: "June", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD066", customer_id: "C010", product_id: "P041", product_name: "MacBook Stand Aluminum", category: "Accessories", quantity: 1, unit_price: 89.99, total_amount: 89.99, discount: 0, date: new Date("2024-06-30"), month: "June", quarter: "Q2", sales_rep: "Bob Martin", region: "North America"},
+  {order_id: "ORD067", customer_id: "C008", product_id: "P001", product_name: "MacBook Pro 14\"", category: "Laptops", quantity: 1, unit_price: 1999.99, total_amount: 1999.99, discount: 100.00, date: new Date("2024-06-30"), month: "June", quarter: "Q2", sales_rep: "Bob Martin", region: "North America"},
+  {order_id: "ORD068", customer_id: "C015", product_id: "P024", product_name: "Samsung Galaxy Buds2 Pro", category: "Audio", quantity: 2, unit_price: 229.99, total_amount: 459.98, discount: 23.00, date: new Date("2024-06-30"), month: "June", quarter: "Q2", sales_rep: "Diana Prince", region: "Europe"},
+  {order_id: "ORD069", customer_id: "C022", product_id: "P042", product_name: "Phone Case iPhone 15", category: "Accessories", quantity: 4, unit_price: 49.99, total_amount: 199.96, discount: 10.00, date: new Date("2024-06-30"), month: "June", quarter: "Q2", sales_rep: "Eve Johnson", region: "Asia-Pacific"},
+  {order_id: "ORD070", customer_id: "C004", product_id: "P014", product_name: "OnePlus 12", category: "Smartphones", quantity: 1, unit_price: 799.99, total_amount: 799.99, discount: 40.00, date: new Date("2024-06-30"), month: "June", quarter: "Q2", sales_rep: "Alice Cooper", region: "North America"}
+]);
+print("✓ Sales transactions inserted successfully");
+
+// ========================================
+// 5. USER ENGAGEMENT COLLECTION
+// ========================================
+db.user_engagement.insertMany([
+  {customer_id: "C001", session_date: new Date("2024-01-05"), page_views: 15, time_spent_minutes: 25, actions_taken: 8, device: "Desktop", source: "Google Search", bounce_rate: false},
+  {customer_id: "C002", session_date: new Date("2024-01-10"), page_views: 8, time_spent_minutes: 12, actions_taken: 3, device: "Mobile", source: "Social Media", bounce_rate: false},
+  {customer_id: "C003", session_date: new Date("2024-01-15"), page_views: 22, time_spent_minutes: 45, actions_taken: 12, device: "Desktop", source: "Direct", bounce_rate: false},
+  {customer_id: "C004", session_date: new Date("2024-02-02"), page_views: 6, time_spent_minutes: 8, actions_taken: 2, device: "Tablet", source: "Email Campaign", bounce_rate: true},
+  {customer_id: "C005", session_date: new Date("2024-02-08"), page_views: 18, time_spent_minutes: 32, actions_taken: 9, device: "Mobile", source: "Google Ads", bounce_rate: false},
+  {customer_id: "C011", session_date: new Date("2024-02-12"), page_views: 12, time_spent_minutes: 20, actions_taken: 5, device: "Desktop", source: "Organic Search", bounce_rate: false},
+  {customer_id: "C007", session_date: new Date("2024-03-05"), page_views: 28, time_spent_minutes: 55, actions_taken: 15, device: "Desktop", source: "Direct", bounce_rate: false},
+  {customer_id: "C012", session_date: new Date("2024-03-10"), page_views: 14, time_spent_minutes: 22, actions_taken: 7, device: "Mobile", source: "Social Media", bounce_rate: false},
+  {customer_id: "C019", session_date: new Date("2024-03-18"), page_views: 19, time_spent_minutes: 35, actions_taken: 10, device: "Desktop", source: "Google Search", bounce_rate: false},
+  {customer_id: "C020", session_date: new Date("2024-04-02"), page_views: 7, time_spent_minutes: 10, actions_taken: 3, device: "Mobile", source: "Social Media", bounce_rate: true},
+  {customer_id: "C014", session_date: new Date("2024-04-15"), page_views: 16, time_spent_minutes: 28, actions_taken: 8, device: "Desktop", source: "Email Campaign", bounce_rate: false},
+  {customer_id: "C023", session_date: new Date("2024-04-22"), page_views: 24, time_spent_minutes: 48, actions_taken: 13, device: "Desktop", source: "Direct", bounce_rate: false},
+  {customer_id: "C015", session_date: new Date("2024-05-05"), page_views: 11, time_spent_minutes: 18, actions_taken: 6, device: "Tablet", source: "Google Ads", bounce_rate: false},
+  {customer_id: "C021", session_date: new Date("2024-05-12"), page_views: 20, time_spent_minutes: 38, actions_taken: 11, device: "Mobile", source: "Organic Search", bounce_rate: false},
+  {customer_id: "C009", session_date: new Date("2024-05-20"), page_views: 13, time_spent_minutes: 24, actions_taken: 7, device: "Desktop", source: "Direct", bounce_rate: false},
+  {customer_id: "C025", session_date: new Date("2024-06-03"), page_views: 17, time_spent_minutes: 30, actions_taken: 9, device: "Desktop", source: "Google Search", bounce_rate: false},
+  {customer_id: "C016", session_date: new Date("2024-06-10"), page_views: 9, time_spent_minutes: 14, actions_taken: 4, device: "Mobile", source: "Social Media", bounce_rate: false},
+  {customer_id: "C022", session_date: new Date("2024-06-18"), page_views: 21, time_spent_minutes: 42, actions_taken: 12, device: "Desktop", source: "Email Campaign", bounce_rate: false},
+  {customer_id: "C024", session_date: new Date("2024-06-25"), page_views: 15, time_spent_minutes: 26, actions_taken: 8, device: "Tablet", source: "Direct", bounce_rate: false},
+  {customer_id: "C018", session_date: new Date("2024-06-28"), page_views: 12, time_spent_minutes: 19, actions_taken: 6, device: "Mobile", source: "Google Ads", bounce_rate: false}
+]);
+print("✓ User engagement data inserted successfully");
+
+// ========================================
+// 6. MARKETING CAMPAIGNS COLLECTION
+// ========================================
+db.marketing_campaigns.insertMany([
+  {campaign_id: "CAMP001", name: "Summer Electronics Sale", type: "Email", start_date: new Date("2024-06-01"), end_date: new Date("2024-06-30"), budget: 50000, spent: 48500, impressions: 250000, clicks: 12500, conversions: 850, revenue_generated: 187500, target_audience: "Electronics Enthusiasts", ctr: 5.0, conversion_rate: 6.8},
+  {campaign_id: "CAMP002", name: "Back to School Laptops", type: "Google Ads", start_date: new Date("2024-07-01"), end_date: new Date("2024-08-31"), budget: 75000, spent: 28000, impressions: 180000, clicks: 9500, conversions: 420, revenue_generated: 89250, target_audience: "Students", ctr: 5.3, conversion_rate: 4.4},
+  {campaign_id: "CAMP003", name: "Apple Products Showcase", type: "Social Media", start_date: new Date("2024-05-15"), end_date: new Date("2024-06-15"), budget: 30000, spent: 29500, impressions: 320000, clicks: 15600, conversions: 1200, revenue_generated: 234000, target_audience: "Apple Fans", ctr: 4.9, conversion_rate: 7.7},
+  {campaign_id: "CAMP004", name: "Gaming Setup Promotion", type: "Influencer", start_date: new Date("2024-04-01"), end_date: new Date("2024-04-30"), budget: 25000, spent: 24800, impressions: 150000, clicks: 8200, conversions: 380, revenue_generated: 76000, target_audience: "Gamers", ctr: 5.5, conversion_rate: 4.6},
+  {campaign_id: "CAMP005", name: "Premium Audio Collection", type: "Display Ads", start_date: new Date("2024-03-01"), end_date: new Date("2024-03-31"), budget: 20000, spent: 19200, impressions: 200000, clicks: 6800, conversions: 290, revenue_generated: 58000, target_audience: "Audio Enthusiasts", ctr: 3.4, conversion_rate: 4.3},
+  {campaign_id: "CAMP006", name: "Smartphone Trade-in", type: "Email", start_date: new Date("2024-02-01"), end_date: new Date("2024-02-29"), budget: 15000, spent: 14500, impressions: 100000, clicks: 5500, conversions: 220, revenue_generated: 44000, target_audience: "Smartphone Users", ctr: 5.5, conversion_rate: 4.0},
+  {campaign_id: "CAMP007", name: "New Year Tech Deals", type: "Google Ads", start_date: new Date("2024-01-01"), end_date: new Date("2024-01-31"), budget: 40000, spent: 38900, impressions: 300000, clicks: 18000, conversions: 950, revenue_generated: 190000, target_audience: "Tech Enthusiasts", ctr: 6.0, conversion_rate: 5.3}
+]);
+print("✓ Marketing campaigns inserted successfully");
+
+// ========================================
+// 7. INVENTORY TRACKING COLLECTION
+// ========================================
+db.inventory_tracking.insertMany([
+  {product_id: "P001", date: new Date("2024-06-30"), stock_level: 45, reorder_point: 20, supplier: "Apple Inc", last_restock: new Date("2024-06-15"), units_sold_month: 8},
+  {product_id: "P011", date: new Date("2024-06-30"), stock_level: 123, reorder_point: 50, supplier: "Apple Inc", last_restock: new Date("2024-06-20"), units_sold_month: 12},
+  {product_id: "P021", date: new Date("2024-06-30"), stock_level: 234, reorder_point: 100, supplier: "Apple Inc", last_restock: new Date("2024-06-10"), units_sold_month: 18},
+  {product_id: "P002", date: new Date("2024-06-30"), stock_level: 67, reorder_point: 25, supplier: "Dell Technologies", last_restock: new Date("2024-06-05"), units_sold_month: 6},
+  {product_id: "P022", date: new Date("2024-06-30"), stock_level: 156, reorder_point: 60, supplier: "Sony Corporation", last_restock: new Date("2024-06-18"), units_sold_month: 9},
+  {product_id: "P032", date: new Date("2024-06-30"), stock_level: 56, reorder_point: 30, supplier: "Samsung Electronics", last_restock: new Date("2024-06-12"), units_sold_month: 4},
+  {product_id: "P037", date: new Date("2024-06-30"), stock_level: 189, reorder_point: 75, supplier: "Razer Inc", last_restock: new Date("2024-06-08"), units_sold_month: 15},
+  {product_id: "P046", date: new Date("2024-06-30"), stock_level: 89, reorder_point: 40, supplier: "LG Electronics", last_restock: new Date("2024-06-14"), units_sold_month: 7}
+]);
+print("✓ Inventory tracking data inserted successfully");
+
+// ========================================
+// 8. VERIFICATION AND STATISTICS
+// ========================================
+print("\n=== DATASET SETUP COMPLETE ===");
+print("Products count:", db.products.countDocuments());
+print("Customers count:", db.customers.countDocuments());
+print("Sales count:", db.sales.countDocuments());
+print("User engagement count:", db.user_engagement.countDocuments());
+print("Marketing campaigns count:", db.marketing_campaigns.countDocuments());
+print("Inventory tracking count:", db.inventory_tracking.countDocuments());
+
+print("\n=== DATABASE STATISTICS ===");
+
+// --- Robustly check aggregation results to prevent errors on empty collections ---
+const totalRevenueResult = db.sales.aggregate([{$group: {_id: null, total: {$sum: "$total_amount"}}}]).next();
+const avgOrderValueResult = db.sales.aggregate([{$group: {_id: null, avg: {$avg: "$total_amount"}}}]).next();
+const topCategoryResult = db.sales.aggregate([{$group: {_id: "$category", total: {$sum: "$total_amount"}}}, {$sort: {total: -1}}, {$limit: 1}]).next();
+
+print("Total Revenue (All Time): $" + (totalRevenueResult ? totalRevenueResult.total.toFixed(2) : "0.00"));
+print("Average Order Value: $" + (avgOrderValueResult ? avgOrderValueResult.avg.toFixed(2) : "0.00"));
+if (topCategoryResult) {
+    print("Top Category by Sales: " + topCategoryResult._id + " ($" + topCategoryResult.total.toFixed(2) + ")");
+} else {
+    print("Top Category by Sales: N/A");
+}
+
+print("\n=== READY FOR CONVERSATIONAL ANALYTICS! ===");
