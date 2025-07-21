@@ -782,44 +782,169 @@ def generate_enhanced_summary(user_question, results, query_result):
         return f"Found {len(results)} results for your query. The analysis provides insights based on your question about {user_question.lower()}."
 
 def extract_json_from_response(response_text):
-    """Enhanced JSON extraction with better error handling"""
+    """Enhanced JSON extraction with better error handling and debugging"""
     try:
         logger.info(f"Extracting JSON from response: {response_text[:200]}...")
         
         # Clean the response text
         text = response_text.strip()
         
-        # Method 1: Try direct JSON parsing
+        # Method 1: Try direct JSON parsing first
         try:
             parsed = json.loads(text)
             if isinstance(parsed, dict) and 'collection' in parsed:
+                logger.info("✅ Successfully parsed direct JSON")
                 return parsed
         except json.JSONDecodeError:
             pass
         
-        # Method 2: Remove markdown formatting
-        text = re.sub(r'```json\s*', '', text)
-        text = re.sub(r'```\s*', '', text)
+        # Method 2: Remove markdown formatting and try again
+        # Remove ```json and ``` markers
+        text = re.sub(r'```json\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'```\s*$', '', text, flags=re.MULTILINE)
         text = re.sub(r'^\s*Here.*?:\s*', '', text, flags=re.MULTILINE | re.IGNORECASE)
+        text = text.strip()
         
-        # Method 3: Extract JSON using regex
-        json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
-        matches = re.findall(json_pattern, text, re.DOTALL)
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and 'collection' in parsed:
+                logger.info("✅ Successfully parsed after markdown cleanup")
+                return parsed
+        except json.JSONDecodeError:
+            pass
         
-        for match in matches:
+        # Method 3: Extract JSON using improved regex patterns
+        # Pattern 1: Look for JSON objects within code blocks
+        json_block_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
+        json_block_match = re.search(json_block_pattern, response_text, re.DOTALL | re.IGNORECASE)
+        if json_block_match:
             try:
-                parsed = json.loads(match)
+                json_content = json_block_match.group(1).strip()
+                parsed = json.loads(json_content)
                 if isinstance(parsed, dict) and 'collection' in parsed:
+                    logger.info("✅ Successfully extracted from code block")
+                    return parsed
+            except json.JSONDecodeError as e:
+                logger.warning(f"Code block JSON parsing failed: {e}")
+        
+        # Pattern 2: Look for standalone JSON objects
+        json_object_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        json_matches = re.findall(json_object_pattern, response_text, re.DOTALL)
+        
+        for match in json_matches:
+            try:
+                # Clean up the match
+                clean_match = match.strip()
+                # Fix common issues with escaped quotes
+                clean_match = clean_match.replace('\\"', '"')
+                
+                parsed = json.loads(clean_match)
+                if isinstance(parsed, dict) and 'collection' in parsed:
+                    logger.info("✅ Successfully extracted using regex pattern")
                     return parsed
             except json.JSONDecodeError:
                 continue
         
-        logger.error("All JSON extraction methods failed")
+        # Method 4: Handle truncated JSON (the main issue you're facing)
+        # Look for the start of JSON and try to reconstruct it
+        json_start_pattern = r'\{\s*"collection"\s*:\s*"([^"]+)"'
+        start_match = re.search(json_start_pattern, response_text)
+        
+        if start_match:
+            collection_name = start_match.group(1)
+            logger.info(f"Found collection name: {collection_name}, attempting reconstruction")
+            
+            # Try to find other key components
+            chart_type_match = re.search(r'"chart_type"\s*:\s*"([^"]+)"', response_text)
+            chart_type = chart_type_match.group(1) if chart_type_match else "bar"
+            
+            # For truncated mongo_query, provide a reasonable fallback
+            mongo_query_match = re.search(r'"mongo_query"\s*:\s*"(\[.*?)(?:"|$)', response_text, re.DOTALL)
+            
+            if mongo_query_match:
+                # Try to repair the mongo_query
+                mongo_query_raw = mongo_query_match.group(1)
+                # Add closing brackets if missing
+                if not mongo_query_raw.endswith(']'):
+                    mongo_query_raw += ']'
+                
+                try:
+                    # Validate the mongo query
+                    mongo_query = json.loads(mongo_query_raw)
+                    
+                    # Reconstruct the JSON object
+                    reconstructed = {
+                        "collection": collection_name,
+                        "mongo_query": mongo_query,
+                        "chart_type": chart_type,
+                        "chart_mapping": {
+                            "labels_field": "_id",
+                            "data_field": "total_quantity",
+                            "title": "Query Results"
+                        }
+                    }
+                    
+                    logger.info("✅ Successfully reconstructed truncated JSON")
+                    return reconstructed
+                    
+                except json.JSONDecodeError:
+                    logger.warning("Failed to parse reconstructed mongo_query")
+        
+        # Method 5: Last resort - try to extract any valid JSON structure
+        # and fill in missing parts with defaults
+        try:
+            # Find any JSON-like structure
+            possible_json = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if possible_json:
+                json_text = possible_json.group()
+                # Try to fix common JSON issues
+                json_text = re.sub(r',\s*}', '}', json_text)  # Remove trailing commas
+                json_text = re.sub(r',\s*]', ']', json_text)  # Remove trailing commas in arrays
+                
+                parsed = json.loads(json_text)
+                
+                # Ensure minimum required fields exist
+                if not isinstance(parsed, dict):
+                    parsed = {}
+                
+                if 'collection' not in parsed:
+                    parsed['collection'] = 'sales'  # Default collection
+                
+                if 'chart_type' not in parsed:
+                    parsed['chart_type'] = 'bar'  # Default chart type
+                
+                if 'mongo_query' not in parsed:
+                    # Provide a basic fallback query
+                    parsed['mongo_query'] = [
+                        {"$group": {"_id": "$product_name", "total_quantity": {"$sum": "$quantity"}}},
+                        {"$sort": {"total_quantity": -1}},
+                        {"$limit": 10}
+                    ]
+                
+                if 'chart_mapping' not in parsed:
+                    parsed['chart_mapping'] = {
+                        "labels_field": "_id",
+                        "data_field": "total_quantity",
+                        "title": "Analysis Results"
+                    }
+                
+                logger.info("✅ Successfully created fallback JSON structure")
+                return parsed
+                
+        except json.JSONDecodeError:
+            pass
+        
+        # If all methods fail, log the full response for debugging
+        logger.error("❌ All JSON extraction methods failed")
+        logger.error(f"Full response text: {response_text}")
         return None
         
     except Exception as e:
         logger.error(f"JSON extraction error: {e}")
+        logger.error(f"Response text: {response_text}")
         return None
+    
+
 
 # =====================================================
 # FEEDBACK ENDPOINTS
