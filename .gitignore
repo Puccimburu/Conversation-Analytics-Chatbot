@@ -1,0 +1,32 @@
+# ===================================================================
+# Python / Project Specific
+# ===================================================================
+
+# --- Secrets ---
+.env
+*.env
+
+# --- Python Virtual Environment ---
+web-scraping-pipeline/
+venv/
+
+# --- Python cache and compiled files ---
+__pycache__/
+*.pyc
+
+# ===================================================================
+# Frontend / Node.js Specific
+# ===================================================================
+
+# --- Node Dependencies ---
+# NEVER commit node_modules
+frontend/node_modules
+
+# --- Build artifacts ---
+frontend/build
+frontend/dist
+
+# --- Logs ---
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
