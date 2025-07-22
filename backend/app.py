@@ -1533,7 +1533,7 @@ class PerfectedTwoStageProcessor:
             }
     
     async def _execute_database_query(self, query_data: Dict) -> Optional[List[Dict]]:
-        """Execute MongoDB query with enhanced error handling"""
+        """Execute MongoDB query with enhanced error handling and ObjectId conversion"""
         try:
             collection_name = query_data.get("collection")
             pipeline = query_data.get("pipeline", [])
@@ -1545,19 +1545,59 @@ class PerfectedTwoStageProcessor:
             collection = self.db[collection_name]
             results = list(collection.aggregate(pipeline))
             
-            logger.info(f"Database query executed: {len(results)} results from {collection_name}")
+            # Convert ObjectIds to strings for JSON serialization
+            cleaned_results = []
+            for result in results:
+                cleaned_result = self._clean_mongodb_result(result)
+                cleaned_results.append(cleaned_result)
             
-            # Log sample results for debugging
-            if results and len(results) > 0:
-                logger.info(f"Sample result: {results[0]}")
+            logger.info(f"Database query executed: {len(cleaned_results)} results from {collection_name}")
             
-            return results
+            # Log sample results for debugging (now safe for JSON serialization)
+            if cleaned_results and len(cleaned_results) > 0:
+                logger.info(f"Sample result: {cleaned_results[0]}")
+            
+            return cleaned_results
             
         except Exception as e:
             logger.error(f"Database query execution failed: {e}")
             logger.error(f"Collection: {query_data.get('collection')}")
             logger.error(f"Pipeline: {query_data.get('pipeline')}")
             return None
+    
+    def _clean_mongodb_result(self, result: Dict) -> Dict:
+        """Clean MongoDB result by converting ObjectIds and datetime objects to JSON-serializable types"""
+        import bson
+        from datetime import datetime
+        
+        cleaned = {}
+        
+        for key, value in result.items():
+            if isinstance(value, bson.ObjectId):
+                # Convert ObjectId to string
+                cleaned[key] = str(value)
+            elif isinstance(value, datetime):
+                # Convert datetime to ISO string
+                cleaned[key] = value.isoformat()
+            elif isinstance(value, dict):
+                # Recursively clean nested dictionaries
+                cleaned[key] = self._clean_mongodb_result(value)
+            elif isinstance(value, list):
+                # Clean lists that might contain ObjectIds or datetime objects
+                cleaned_list = []
+                for item in value:
+                    if isinstance(item, (bson.ObjectId, datetime)):
+                        cleaned_list.append(str(item) if isinstance(item, bson.ObjectId) else item.isoformat())
+                    elif isinstance(item, dict):
+                        cleaned_list.append(self._clean_mongodb_result(item))
+                    else:
+                        cleaned_list.append(item)
+                cleaned[key] = cleaned_list
+            else:
+                # Keep other types as-is
+                cleaned[key] = value
+        
+        return cleaned
     
     def _create_enhanced_visualization(self, user_question: str, raw_results: List[Dict], query_data: Dict) -> Dict[str, Any]:
         """Create enhanced visualization when Gemini Stage 2 fails"""
