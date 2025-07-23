@@ -1,1041 +1,271 @@
-import React, { useState, useEffect } from 'react';
-import { BarChart3, ThumbsUp, ThumbsDown, AlertTriangle, CheckCircle, Info, Star, Send, TrendingUp, Users, DollarSign, PieChart } from 'lucide-react';
+// src/App.js
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { ChatProvider } from './context/ChatContext';
+import Sidebar from './components/layout/Sidebar';
+import MainChatInterface from './components/chat/MainChatInterface';
+import RecentConversationsPage from './components/chat/RecentConversationsPage';
+import IndividualChatView from './components/chat/IndividualChatView';
+import './index.css';
 
-const App = () => {
-  const [messages, setMessages] = useState([]);
-  const [currentQuery, setCurrentQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [stats, setStats] = useState(null);
-
-  // Load initial stats
-  useEffect(() => {
-    fetchStats();
-  }, []);
-
-  const fetchStats = async () => {
-    try {
-      const response = await fetch('http://localhost:5000/api/health');
-      if (response.ok) {
-        const data = await response.json();
-        setStats(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch stats:', error);
-    }
-  };
-
-  // Feedback Modal Component
-  const FeedbackModal = ({ isOpen, onClose, queryId, currentAnswer }) => {
-    const [rating, setRating] = useState(0);
-    const [feedbackType, setFeedbackType] = useState('general');
-    const [comment, setComment] = useState('');
-    const [correction, setCorrection] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
-
-    const submitFeedback = async () => {
-      if (rating === 0) {
-        alert('Please provide a rating');
-        return;
-      }
-
-      setIsSubmitting(true);
-      try {
-        const response = await fetch('http://localhost:5000/api/feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query_id: queryId,
-            rating,
-            type: feedbackType,
-            comment,
-            correction
-          })
-        });
-
-        if (response.ok) {
-          alert('Thank you for your feedback!');
-          onClose();
-          setRating(0);
-          setComment('');
-          setCorrection('');
-        } else {
-          alert('Failed to submit feedback');
-        }
-      } catch (error) {
-        console.error('Feedback submission error:', error);
-        alert('Failed to submit feedback');
-      } finally {
-        setIsSubmitting(false);
-      }
-    };
-
-    if (!isOpen) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-          <h3 className="text-lg font-semibold mb-4">Rate This Answer</h3>
-          
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Overall Rating</label>
-            <div className="flex space-x-1">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <Star
-                  key={star}
-                  className={`h-6 w-6 cursor-pointer ${
-                    star <= rating ? 'text-yellow-400 fill-current' : 'text-gray-300'
-                  }`}
-                  onClick={() => setRating(star)}
-                />
-              ))}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              {rating === 0 && 'Click to rate'}
-              {rating === 1 && 'Very Poor'}
-              {rating === 2 && 'Poor'}
-              {rating === 3 && 'Average'}
-              {rating === 4 && 'Good'}
-              {rating === 5 && 'Excellent'}
-            </p>
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">What aspect are you rating?</label>
-            <select
-              value={feedbackType}
-              onChange={(e) => setFeedbackType(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2"
-            >
-              <option value="general">Overall Quality</option>
-              <option value="accuracy">Data Accuracy</option>
-              <option value="completeness">Completeness</option>
-              <option value="clarity">Clarity/Readability</option>
-              <option value="chart">Chart Appropriateness</option>
-            </select>
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Additional Comments (Optional)</label>
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="What could be improved?"
-              className="w-full border border-gray-300 rounded-md px-3 py-2 h-20 resize-none"
-            />
-          </div>
-
-          {rating <= 2 && (
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2 text-red-600">
-                What should the correct answer be?
-              </label>
-              <textarea
-                value={correction}
-                onChange={(e) => setCorrection(e.target.value)}
-                placeholder="Please provide the correct answer or explanation..."
-                className="w-full border border-red-300 rounded-md px-3 py-2 h-20 resize-none"
-              />
-            </div>
-          )}
-
-          <div className="flex justify-end space-x-3">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-gray-600 hover:text-gray-800"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={submitFeedback}
-              disabled={isSubmitting || rating === 0}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
-            >
-              <Send className="h-4 w-4" />
-              <span>{isSubmitting ? 'Submitting...' : 'Submit Feedback'}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Validation Display Component
-  const ValidationDisplay = ({ validation }) => {
-    if (!validation) return null;
-
-    const getConfidenceColor = (confidence) => {
-      switch (confidence) {
-        case 'high': return 'text-green-600 bg-green-50';
-        case 'medium': return 'text-yellow-600 bg-yellow-50';
-        case 'low': return 'text-red-600 bg-red-50';
-        default: return 'text-gray-600 bg-gray-50';
-      }
-    };
-
-    const getConfidenceIcon = (confidence) => {
-      switch (confidence) {
-        case 'high': return <CheckCircle className="h-4 w-4" />;
-        case 'medium': return <Info className="h-4 w-4" />;
-        case 'low': return <AlertTriangle className="h-4 w-4" />;
-        default: return <Info className="h-4 w-4" />;
-      }
-    };
-
-    return (
-      <div className="mt-4 border border-gray-200 rounded-lg p-4 bg-gray-50">
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="font-medium text-gray-900">Answer Validation</h4>
-          <div className={`flex items-center space-x-1 px-2 py-1 rounded-full text-xs font-medium ${getConfidenceColor(validation.confidence)}`}>
-            {getConfidenceIcon(validation.confidence)}
-            <span>{validation.confidence?.toUpperCase()} CONFIDENCE</span>
-          </div>
-        </div>
-
-        <div className="mb-3">
-          <div className="flex items-center space-x-2 mb-2">
-            <span className="text-sm font-medium">Validation Score:</span>
-            <div className="flex-1 bg-gray-200 rounded-full h-2">
-              <div
-                className={`h-2 rounded-full ${
-                  validation.overall_score >= 0.8 ? 'bg-green-500' :
-                  validation.overall_score >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'
-                }`}
-                style={{ width: `${validation.overall_score * 100}%` }}
-              />
-            </div>
-            <span className="text-sm text-gray-600">{Math.round(validation.overall_score * 100)}%</span>
-          </div>
-        </div>
-
-        {validation.checks && validation.checks.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-gray-700">Automated Checks:</p>
-            {validation.checks.map((check, index) => (
-              <div key={index} className="flex items-start space-x-2 text-sm">
-                {check.passed ? (
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                ) : (
-                  <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
-                )}
-                <span className={check.passed ? 'text-green-700' : 'text-red-700'}>
-                  {check.message}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {validation.suggestions && validation.suggestions.length > 0 && (
-          <div className="mt-3 p-3 bg-blue-50 rounded-md">
-            <p className="text-sm font-medium text-blue-800 mb-1">Suggestions:</p>
-            <ul className="text-sm text-blue-700 space-y-1">
-              {validation.suggestions.map((suggestion, index) => (
-                <li key={index} className="flex items-start space-x-1">
-                  <span>•</span>
-                  <span>{suggestion}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Multi-Chart Display Component
-  const ChartDisplay = ({ chartData }) => {
-    if (!chartData || !chartData.data) return null;
-
-    const { labels, datasets } = chartData.data;
-    const data = datasets[0]?.data || [];
-    const maxValue = Math.max(...data.filter(val => typeof val === 'number'));
-    const chartType = chartData.type || 'bar';
-
-    const colorSchemes = {
-      vibrant: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16']
-    };
-
-    const getChartColors = (type, dataLength) => {
-      const scheme = colorSchemes.vibrant;
-      if (type === 'pie' || type === 'doughnut') {
-        return scheme.slice(0, dataLength);
-      }
-      return scheme[0];
-    };
-
-    const renderBarChart = () => (
-      <div className="space-y-3">
-        {labels.map((label, index) => (
-          <div key={index} className="flex items-center space-x-3">
-            <div className="w-32 text-sm text-gray-700 font-medium truncate" title={label}>
-              {label}
-            </div>
-            <div className="flex-1 bg-gray-200 rounded-full h-8 relative">
-              <div
-                className="bg-blue-500 h-8 rounded-full flex items-center justify-end pr-3 transition-all duration-500 ease-out"
-                style={{ width: `${maxValue > 0 ? (data[index] / maxValue) * 100 : 0}%` }}
-              >
-                <span className="text-white text-sm font-semibold">
-                  {typeof data[index] === 'number' ? data[index].toLocaleString() : data[index]}
-                </span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-
-    const renderPieChart = () => {
-      const total = data.reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
-      const pieColors = getChartColors('pie', data.length);
-      let currentAngle = 0;
-      
-      return (
-        <div className="flex flex-col lg:flex-row items-center space-y-4 lg:space-y-0 lg:space-x-6">
-          <div className="relative">
-            <svg width="240" height="240" viewBox="0 0 240 240" className="transform -rotate-90">
-              {data.map((value, index) => {
-                const percentage = total > 0 ? (value / total) * 100 : 0;
-                const angle = (percentage / 100) * 360;
-                const startAngle = currentAngle;
-                const endAngle = currentAngle + angle;
-                currentAngle += angle;
-
-                const x1 = 120 + 100 * Math.cos((startAngle * Math.PI) / 180);
-                const y1 = 120 + 100 * Math.sin((startAngle * Math.PI) / 180);
-                const x2 = 120 + 100 * Math.cos((endAngle * Math.PI) / 180);
-                const y2 = 120 + 100 * Math.sin((endAngle * Math.PI) / 180);
-                const largeArcFlag = angle > 180 ? 1 : 0;
-
-                if (percentage < 0.5) return null;
-
-                return (
-                  <path
-                    key={index}
-                    d={`M 120 120 L ${x1} ${y1} A 100 100 0 ${largeArcFlag} 1 ${x2} ${y2} Z`}
-                    fill={pieColors[index % pieColors.length]}
-                    stroke="white"
-                    strokeWidth="3"
-                    className="hover:opacity-80 transition-opacity cursor-pointer"
-                    title={`${labels[index]}: ${percentage.toFixed(1)}%`}
-                  />
-                );
-              })}
+// Enhanced page components with better styling
+const HomePage = () => (
+  <div className="p-8">
+    <h1 className="text-3xl font-bold text-gray-900 mb-4">Analytics Dashboard</h1>
+    <p className="text-gray-600 mb-8">Welcome to your conversational analytics platform</p>
+    
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+        <div className="flex items-center space-x-3 mb-4">
+          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center bg-white rounded-full p-3 shadow-sm">
-                <div className="text-sm font-bold text-gray-900">Total</div>
-                <div className="text-xs text-gray-600">{total.toLocaleString()}</div>
-              </div>
-            </div>
           </div>
-          
-          <div className="grid grid-cols-1 gap-3 max-w-sm">
-            {labels.map((label, index) => {
-              const percentage = total > 0 ? ((data[index] / total) * 100) : 0;
-              return (
-                <div key={index} className="flex items-center space-x-3 p-2 bg-gray-50 rounded">
-                  <div 
-                    className="w-4 h-4 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: pieColors[index % pieColors.length] }}
-                  />
-                  <span className="text-sm text-gray-700 flex-1 font-medium" title={label}>
-                    {label}
-                  </span>
-                  <div className="text-right">
-                    <div className="text-sm font-semibold text-gray-900">
-                      {data[index].toLocaleString()}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {percentage.toFixed(1)}%
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <h3 className="text-lg font-semibold text-gray-900">Recent Conversations</h3>
         </div>
-      );
-    };
+        <p className="text-gray-600 text-sm mb-4">View and manage your chat history with data analytics</p>
+        <button 
+          onClick={() => window.location.href = '/home/recent'}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors w-full"
+        >
+          View History
+        </button>
+      </div>
 
-    const renderDoughnutChart = () => {
-      const doughnutTotal = data.reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
-      const doughnutColors = getChartColors('doughnut', data.length);
-      let doughnutAngle = 0;
-      
-      return (
-        <div className="flex flex-col lg:flex-row items-center space-y-4 lg:space-y-0 lg:space-x-6">
-          <div className="relative">
-            <svg width="240" height="240" viewBox="0 0 240 240" className="transform -rotate-90">
-              {data.map((value, index) => {
-                const percentage = doughnutTotal > 0 ? (value / doughnutTotal) * 100 : 0;
-                const angle = (percentage / 100) * 360;
-                const startAngle = doughnutAngle;
-                const endAngle = doughnutAngle + angle;
-                doughnutAngle += angle;
-
-                const x1 = 120 + 100 * Math.cos((startAngle * Math.PI) / 180);
-                const y1 = 120 + 100 * Math.sin((startAngle * Math.PI) / 180);
-                const x2 = 120 + 100 * Math.cos((endAngle * Math.PI) / 180);
-                const y2 = 120 + 100 * Math.sin((endAngle * Math.PI) / 180);
-                
-                const x3 = 120 + 60 * Math.cos((endAngle * Math.PI) / 180);
-                const y3 = 120 + 60 * Math.sin((endAngle * Math.PI) / 180);
-                const x4 = 120 + 60 * Math.cos((startAngle * Math.PI) / 180);
-                const y4 = 120 + 60 * Math.sin((startAngle * Math.PI) / 180);
-                
-                const largeArcFlag = angle > 180 ? 1 : 0;
-
-                if (percentage < 0.5) return null;
-
-                return (
-                  <path
-                    key={index}
-                    d={`M ${x1} ${y1} A 100 100 0 ${largeArcFlag} 1 ${x2} ${y2} L ${x3} ${y3} A 60 60 0 ${largeArcFlag} 0 ${x4} ${y4} Z`}
-                    fill={doughnutColors[index % doughnutColors.length]}
-                    stroke="white"
-                    strokeWidth="3"
-                    className="hover:opacity-80 transition-opacity cursor-pointer"
-                    title={`${labels[index]}: ${percentage.toFixed(1)}%`}
-                  />
-                );
-              })}
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+        <div className="flex items-center space-x-3 mb-4">
+          <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
+            <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
             </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <div className="text-lg font-bold text-gray-900">Total</div>
-                <div className="text-sm text-gray-600">{doughnutTotal.toLocaleString()}</div>
-              </div>
-            </div>
           </div>
-          
-          <div className="grid grid-cols-1 gap-3 max-w-sm">
-            {labels.map((label, index) => {
-              const percentage = doughnutTotal > 0 ? ((data[index] / doughnutTotal) * 100) : 0;
-              return (
-                <div key={index} className="flex items-center space-x-3 p-2 bg-gray-50 rounded">
-                  <div 
-                    className="w-4 h-4 rounded-sm flex-shrink-0"
-                    style={{ backgroundColor: doughnutColors[index % doughnutColors.length] }}
-                  />
-                  <span className="text-sm text-gray-700 flex-1 font-medium" title={label}>
-                    {label}
-                  </span>
-                  <div className="text-right">
-                    <div className="text-sm font-semibold text-gray-900">
-                      {data[index].toLocaleString()}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {percentage.toFixed(1)}%
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <h3 className="text-lg font-semibold text-gray-900">Favorites</h3>
         </div>
-      );
-    };
+        <p className="text-gray-600 text-sm mb-4">Your starred conversations and top insights</p>
+        <button 
+          onClick={() => window.location.href = '/home/favorites'}
+          className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors w-full"
+        >
+          View Favorites
+        </button>
+      </div>
 
-    const renderLineChart = () => {
-      const lineMaxValue = Math.max(...data.filter(val => typeof val === 'number'));
-      const lineMinValue = Math.min(...data.filter(val => typeof val === 'number'));
-      const lineRange = lineMaxValue - lineMinValue || 1;
-      
-      return (
-        <div className="w-full bg-white p-4 rounded border">
-          <svg width="100%" height="320" viewBox="0 0 700 320" className="bg-gray-50 rounded">
-            {[0, 1, 2, 3, 4, 5].map(i => (
-              <g key={i}>
-                <line
-                  x1="80"
-                  y1={60 + (i * 40)}
-                  x2="650"
-                  y2={60 + (i * 40)}
-                  stroke="#e5e7eb"
-                  strokeWidth="1"
-                />
-                <text
-                  x="70"
-                  y={65 + (i * 40)}
-                  textAnchor="end"
-                  className="text-xs fill-gray-500"
-                >
-                  {Math.round(lineMaxValue - (i * lineRange / 5)).toLocaleString()}
-                </text>
-              </g>
-            ))}
-            
-            <polyline
-              points={data.map((value, index) => {
-                const x = 80 + (index * (570 / Math.max(data.length - 1, 1)));
-                const y = 260 - ((value - lineMinValue) / lineRange) * 200;
-                return `${x},${y}`;
-              }).join(' ')}
-              fill="none"
-              stroke="#3B82F6"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            
-            {data.map((value, index) => {
-              const x = 80 + (index * (570 / Math.max(data.length - 1, 1)));
-              const y = 260 - ((value - lineMinValue) / lineRange) * 200;
-              return (
-                <g key={index}>
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r="5"
-                    fill="#3B82F6"
-                    stroke="white"
-                    strokeWidth="2"
-                    className="hover:r-7 transition-all cursor-pointer"
-                  />
-                  <text
-                    x={x}
-                    y={y - 10}
-                    textAnchor="middle"
-                    className="text-xs fill-gray-700 opacity-0 hover:opacity-100"
-                  >
-                    {value.toLocaleString()}
-                  </text>
-                </g>
-              );
-            })}
-            
-            {labels.map((label, index) => {
-              const x = 80 + (index * (570 / Math.max(data.length - 1, 1)));
-              return (
-                <text
-                  key={index}
-                  x={x}
-                  y="290"
-                  textAnchor="middle"
-                  className="text-xs fill-gray-600"
-                  transform={label.length > 8 ? `rotate(-45, ${x}, 290)` : ''}
-                >
-                  {label.length > 12 ? label.substring(0, 12) + '...' : label}
-                </text>
-              );
-            })}
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+        <div className="flex items-center space-x-3 mb-4">
+          <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+            <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900">Analytics</h3>
+        </div>
+        <p className="text-gray-600 text-sm mb-4">Create new data visualizations and insights</p>
+        <button 
+          onClick={() => window.location.href = '/new'}
+          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors w-full"
+        >
+          Start Analyzing
+        </button>
+      </div>
+    </div>
+
+    {/* Recent Activity Section */}
+    <div className="mt-8">
+      <h2 className="text-xl font-semibold text-gray-900 mb-4">Recent Activity</h2>
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="text-center text-gray-500 py-8">
+          <svg className="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+          <p className="text-lg font-medium">No recent activity</p>
+          <p className="text-sm mt-1">Start asking questions about your data to see activity here</p>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+const FavoritesPage = () => (
+  <div className="p-8">
+    <h1 className="text-3xl font-bold text-gray-900 mb-4">Favorites</h1>
+    <p className="text-gray-600 mb-6">Your starred conversations and insights</p>
+    <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+      <div className="text-gray-400 mb-4">
+        <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-medium text-gray-900 mb-2">No favorites yet</h3>
+      <p className="text-gray-500 mb-4">Star conversations to save them here</p>
+      <button 
+        onClick={() => window.location.href = '/new'}
+        className="bg-yellow-600 text-white px-6 py-3 rounded-lg hover:bg-yellow-700 transition-colors"
+      >
+        Start a Conversation
+      </button>
+    </div>
+  </div>
+);
+
+const SharedPage = () => (
+  <div className="p-8">
+    <h1 className="text-3xl font-bold text-gray-900 mb-4">Shared</h1>
+    <p className="text-gray-600 mb-6">Conversations shared with you and by you</p>
+    <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+      <div className="text-gray-400 mb-4">
+        <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-medium text-gray-900 mb-2">No shared conversations</h3>
+      <p className="text-gray-500 mb-4">Share insights and analyses with your team</p>
+      <button className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors">
+        Share Analysis
+      </button>
+    </div>
+  </div>
+);
+
+const DiscoverPage = () => (
+  <div className="p-8">
+    <h1 className="text-3xl font-bold text-gray-900 mb-4">Discover</h1>
+    <p className="text-gray-600 mb-6">Explore analytics and insights</p>
+    
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {[
+        { title: 'For You', description: 'Personalized analytics insights', category: 'for-you' },
+        { title: 'Tech', description: 'Technology and product analytics', category: 'tech' },
+        { title: 'Business', description: 'Business intelligence and metrics', category: 'business' },
+        { title: 'Finance', description: 'Financial data and trends', category: 'finance' },
+        { title: 'Sales', description: 'Sales performance and forecasting', category: 'sales' },
+        { title: 'Marketing', description: 'Marketing analytics and ROI', category: 'marketing' }
+      ].map((item) => (
+        <div key={item.category} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow cursor-pointer">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">{item.title}</h3>
+          <p className="text-gray-600 text-sm">{item.description}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+const SpacesPage = () => (
+  <div className="p-8">
+    <h1 className="text-3xl font-bold text-gray-900 mb-4">Spaces</h1>
+    <p className="text-gray-600 mb-6">Organize your analytics projects</p>
+    <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+      <div className="text-gray-400 mb-4">
+        <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-medium text-gray-900 mb-2">No spaces yet</h3>
+      <p className="text-gray-500 mb-4">Create spaces to organize your analytics projects</p>
+      <button className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors">
+        Create Space
+      </button>
+    </div>
+  </div>
+);
+
+// Main interface for new conversations
+const NewThreadPage = () => <MainChatInterface />;
+
+// Dynamic page component that shows the current route
+const DynamicPage = () => {
+  const location = useLocation();
+  const pathSegments = location.pathname.split('/').filter(Boolean);
+  const pageName = pathSegments[pathSegments.length - 1] || 'home';
+  
+  return (
+    <div className="p-8">
+      <h1 className="text-3xl font-bold text-gray-900 mb-4 capitalize">
+        {pageName.replace('-', ' ')}
+      </h1>
+      <p className="text-gray-600 mb-4">
+        Current path: <code className="bg-gray-100 px-2 py-1 rounded">{location.pathname}</code>
+      </p>
+      <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+        <div className="text-gray-400 mb-4">
+          <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
         </div>
-      );
-    };
-
-    const renderChart = () => {
-      console.log('Rendering chart type:', chartType, 'with data:', data);
-      
-      switch (chartType) {
-        case 'pie':
-          return renderPieChart();
-        case 'doughnut':
-          return renderDoughnutChart();
-        case 'line':
-          return renderLineChart();
-        case 'bar':
-        default:
-          return renderBarChart();
-      }
-    };
-
-    const getChartTypeIcon = () => {
-      switch (chartType) {
-        case 'pie':
-        case 'doughnut':
-          return <PieChart className="h-4 w-4" />;
-        case 'line':
-          return <TrendingUp className="h-4 w-4" />;
-        case 'bar':
-        default:
-          return <BarChart3 className="h-4 w-4" />;
-      }
-    };
-
-    return (
-      <div className="mt-4 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h4 className="font-semibold text-gray-900 text-lg">
-            {chartData.options?.plugins?.title?.text || 'Analytics Chart'}
-          </h4>
-          <div className="flex items-center space-x-2 text-sm text-gray-500">
-            {getChartTypeIcon()}
-            <span className="capitalize">{chartType} Chart</span>
-            <span>•</span>
-            <span>{data.length} data points</span>
-          </div>
-        </div>
-        
-        <div className="chart-container">
-          {renderChart()}
-        </div>
-        
-        <div className="mt-4 pt-3 border-t border-gray-100 text-xs text-gray-500 flex justify-between">
-          <span>Chart Type: {chartType.charAt(0).toUpperCase() + chartType.slice(1)}</span>
-          <span>Generated: {new Date().toLocaleTimeString()}</span>
-        </div>
-      </div>
-    );
-  };
-
-  // Message Component with Feedback
-  const MessageWithFeedback = ({ message }) => {
-    const [showFeedback, setShowFeedback] = useState(false);
-    const [feedbackGiven, setFeedbackGiven] = useState(false);
-
-    const quickFeedback = async (isHelpful) => {
-      if (!message.queryId) return;
-
-      try {
-        await fetch('http://localhost:5000/api/feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query_id: message.queryId,
-            rating: isHelpful ? 5 : 2,
-            type: 'general',
-            comment: isHelpful ? 'Quick positive feedback' : 'Quick negative feedback'
-          })
-        });
-        setFeedbackGiven(true);
-      } catch (error) {
-        console.error('Quick feedback error:', error);
-      }
-    };
-
-    return (
-      <div className={`p-4 rounded-lg ${message.type === 'user' ? 'bg-blue-100 ml-12' : 'bg-white border'}`}>
-        {message.type === 'user' ? (
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-sm font-medium">
-              U
-            </div>
-            <p className="text-blue-900">{message.content}</p>
-          </div>
-        ) : (
-          <div>
-            <div className="flex items-start space-x-3">
-              <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-white text-sm font-medium">
-                AI
-              </div>
-              <div className="flex-1">
-                <div className="text-gray-800 whitespace-pre-wrap">{message.content}</div>
-                
-                {message.chartData && <ChartDisplay chartData={message.chartData} />}
-
-                {message.validation && <ValidationDisplay validation={message.validation} />}
-
-                {message.queryId && (
-                  <div className="mt-4 pt-3 border-t border-gray-200">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-600">Was this answer helpful?</span>
-                      
-                      {!feedbackGiven ? (
-                        <div className="flex items-center space-x-3">
-                          <button
-                            onClick={() => quickFeedback(true)}
-                            className="flex items-center space-x-1 px-3 py-1 text-green-600 hover:bg-green-50 rounded-md transition-colors"
-                            title="Yes, this was helpful"
-                          >
-                            <ThumbsUp className="h-4 w-4" />
-                            <span className="text-sm">Yes</span>
-                          </button>
-                          
-                          <button
-                            onClick={() => quickFeedback(false)}
-                            className="flex items-center space-x-1 px-3 py-1 text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                            title="No, this needs improvement"
-                          >
-                            <ThumbsDown className="h-4 w-4" />
-                            <span className="text-sm">No</span>
-                          </button>
-                          
-                          <button
-                            onClick={() => setShowFeedback(true)}
-                            className="px-3 py-1 text-blue-600 hover:bg-blue-50 rounded-md transition-colors text-sm"
-                          >
-                            Detailed Feedback
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center space-x-2 text-green-600">
-                          <CheckCircle className="h-4 w-4" />
-                          <span className="text-sm">Thank you for your feedback!</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-2 text-xs text-gray-400">
-                      Query ID: {message.queryId} | 
-                      Confidence: {message.validation?.confidence || 'unknown'} | 
-                      Score: {message.validation ? Math.round(message.validation.overall_score * 100) : 0}%
-                    </div>
-                  </div>
-                )}
-
-                <FeedbackModal
-                  isOpen={showFeedback}
-                  onClose={() => setShowFeedback(false)}
-                  queryId={message.queryId}
-                  currentAnswer={message.content}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Main query processing function
-  const handleSubmit = (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (!currentQuery.trim() || isLoading) return;
-
-    const userMessage = {
-      type: 'user',
-      content: currentQuery,
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setIsLoading(true);
-    const queryText = currentQuery;
-    setCurrentQuery('');
-
-    (async () => {
-      try {
-        const response = await fetch('http://localhost:5000/api/query', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: queryText })
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-          const aiMessage = {
-            type: 'ai',
-            content: data.summary,
-            chartData: data.chart_data,
-            queryId: data.query_id,
-            validation: data.validation,
-            timestamp: new Date()
-          };
-          setMessages(prev => [...prev, aiMessage]);
-        } else {
-          const errorMessage = {
-            type: 'ai',
-            content: `Error: ${data.error}`,
-            timestamp: new Date()
-          };
-          setMessages(prev => [...prev, errorMessage]);
-        }
-      } catch (error) {
-        const errorMessage = {
-          type: 'ai',
-          content: 'Failed to connect to the server. Please check if the backend is running.',
-          timestamp: new Date()
-        };
-        setMessages(prev => [...prev, errorMessage]);
-      } finally {
-        setIsLoading(false);
-      }
-    })();
-  };
-
-  // Enhanced suggested queries with chart type indicators
-  const suggestedQueries = [
-    {
-      query: "Compare smartphone vs laptop sales performance",
-      type: "bar",
-      icon: <BarChart3 className="h-4 w-4" />,
-      description: "Bar chart comparison"
-    },
-    {
-      query: "Show me customer distribution by segment",
-      type: "pie",
-      icon: <PieChart className="h-4 w-4" />,
-      description: "Pie chart breakdown"
-    },
-    {
-      query: "Show me sales revenue by category",
-      type: "doughnut",
-      icon: <PieChart className="h-4 w-4" />,
-      description: "Doughnut chart"
-    },
-    {
-      query: "Show me monthly sales trends for 2024",
-      type: "line",
-      icon: <TrendingUp className="h-4 w-4" />,
-      description: "Line chart trends"
-    },
-    {
-      query: "What were our top 5 selling products this quarter?",
-      type: "bar",
-      icon: <BarChart3 className="h-4 w-4" />,
-      description: "Bar chart ranking"
-    },
-    {
-      query: "Show me inventory levels for low-stock products",
-      type: "bar",
-      icon: <BarChart3 className="h-4 w-4" />,
-      description: "Horizontal bars"
-    }
-  ];
-
-  const handleSuggestedQuery = (query) => {
-    setCurrentQuery(query);
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-3">
-              <div className="bg-indigo-600 p-2 rounded-lg">
-                <BarChart3 className="h-6 w-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Conversational Analytics</h1>
-                <p className="text-sm text-gray-500">Ask questions with multi-chart support and validation</p>
-              </div>
-            </div>
-            
-            {/* Stats Display */}
-            {stats && (
-              <div className="hidden md:flex space-x-6">
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-indigo-600 flex items-center justify-center">
-                    <TrendingUp className="h-5 w-5 mr-1" />
-                    {stats.services?.database === 'available' ? 'Online' : 'Offline'}
-                  </div>
-                  <div className="text-xs text-gray-500">System Status</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-green-600 flex items-center justify-center">
-                    <CheckCircle className="h-5 w-5 mr-1" />
-                    AI
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    {stats.services?.gemini === 'available' ? 'Enhanced' : 'Fallback'}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Enhanced Suggested Queries Sidebar */}
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h3 className="font-semibold text-gray-800 mb-4 flex items-center">
-                <Info className="h-5 w-5 mr-2 text-blue-500" />
-                Try These Questions
-              </h3>
-              <div className="space-y-3">
-                {suggestedQueries.map((item, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleSuggestedQuery(item.query)}
-                    className="w-full text-left p-3 text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-700 rounded-lg border border-transparent hover:border-blue-200 transition-all duration-200 group"
-                  >
-                    <div className="flex items-start space-x-2">
-                      <div className="text-gray-400 group-hover:text-blue-500 mt-0.5">
-                        {item.icon}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-medium">{item.query}</div>
-                        <div className="text-xs text-gray-400 group-hover:text-blue-400 mt-1">
-                          {item.description}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Chart Types Info */}
-            <div className="bg-white rounded-lg shadow-sm p-4 mt-4">
-              <h4 className="font-medium text-gray-800 mb-3">Supported Chart Types</h4>
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center space-x-3">
-                  <BarChart3 className="h-4 w-4 text-blue-500" />
-                  <div>
-                    <div className="font-medium text-gray-700">Bar Charts</div>
-                    <div className="text-xs text-gray-500">Rankings, comparisons</div>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <PieChart className="h-4 w-4 text-green-500" />
-                  <div>
-                    <div className="font-medium text-gray-700">Pie Charts</div>
-                    <div className="text-xs text-gray-500">Distributions, breakdowns</div>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <PieChart className="h-4 w-4 text-purple-500" />
-                  <div>
-                    <div className="font-medium text-gray-700">Doughnut Charts</div>
-                    <div className="text-xs text-gray-500">Category revenue splits</div>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <TrendingUp className="h-4 w-4 text-orange-500" />
-                  <div>
-                    <div className="font-medium text-gray-700">Line Charts</div>
-                    <div className="text-xs text-gray-500">Trends over time</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* System Features */}
-            <div className="bg-white rounded-lg shadow-sm p-4 mt-4">
-              <h4 className="font-medium text-gray-800 mb-3">System Features</h4>
-              <div className="space-y-2 text-sm text-gray-600">
-                <div className="flex items-center space-x-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  <span>Multi-chart support</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  <span>Answer validation</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  <span>Confidence scoring</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  <span>User feedback</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  <span>Performance monitoring</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Main Content Area */}
-          <div className="lg:col-span-3">
-            <div className="bg-white rounded-lg shadow-sm">
-              {/* Messages Area - Full height to bottom of screen */}
-              <div className="overflow-y-auto p-6 space-y-4" style={{ height: 'calc(100vh - 300px)' }}>
-                {messages.length === 0 ? (
-                  <div className="text-center text-gray-500 mt-8">
-                    <div className="flex justify-center space-x-4 mb-4">
-                      <BarChart3 className="h-8 w-8 text-blue-300" />
-                      <PieChart className="h-8 w-8 text-green-300" />
-                      <TrendingUp className="h-8 w-8 text-orange-300" />
-                    </div>
-                    <p className="text-lg font-medium">Welcome to Multi-Chart Analytics!</p>
-                    <p className="text-sm mt-2">Ask questions about your data and get the perfect chart type automatically.</p>
-                    <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-                      <p className="text-sm text-blue-700">
-                        <strong>New:</strong> Support for bar charts, pie charts, doughnut charts, and line charts with automated validation.
-                      </p>
-                    </div>
-                    
-                    {/* Quick examples */}
-                    <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
-                      <div className="bg-gray-50 p-3 rounded">
-                        <div className="flex items-center space-x-2 mb-2">
-                          <BarChart3 className="h-4 w-4 text-blue-500" />
-                          <span className="text-sm font-medium">Bar Charts</span>
-                        </div>
-                        <p className="text-xs text-gray-600">Try: "Top 5 selling products" or "Sales by region"</p>
-                      </div>
-                      <div className="bg-gray-50 p-3 rounded">
-                        <div className="flex items-center space-x-2 mb-2">
-                          <PieChart className="h-4 w-4 text-green-500" />
-                          <span className="text-sm font-medium">Pie Charts</span>
-                        </div>
-                        <p className="text-xs text-gray-600">Try: "Customer distribution by segment"</p>
-                      </div>
-                      <div className="bg-gray-50 p-3 rounded">
-                        <div className="flex items-center space-x-2 mb-2">
-                          <PieChart className="h-4 w-4 text-purple-500" />
-                          <span className="text-sm font-medium">Doughnut Charts</span>
-                        </div>
-                        <p className="text-xs text-gray-600">Try: "Revenue by category"</p>
-                      </div>
-                      <div className="bg-gray-50 p-3 rounded">
-                        <div className="flex items-center space-x-2 mb-2">
-                          <TrendingUp className="h-4 w-4 text-orange-500" />
-                          <span className="text-sm font-medium">Line Charts</span>
-                        </div>
-                        <p className="text-xs text-gray-600">Try: "Monthly sales trends"</p>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  messages.map((message, index) => (
-                    <MessageWithFeedback key={index} message={message} />
-                  ))
-                )}
-                
-                {isLoading && (
-                  <div className="bg-white border rounded-lg p-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
-                      <span className="text-gray-600">Processing your query and selecting the best chart type...</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Input Area */}
-              <div className="border-t p-6">
-                <div className="flex space-x-4">
-                  <input
-                    type="text"
-                    value={currentQuery}
-                    onChange={(e) => setCurrentQuery(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSubmit(e)}
-                    placeholder="Ask a question about your data..."
-                    className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    disabled={isLoading}
-                  />
-                  <button
-                    onClick={handleSubmit}
-                    disabled={isLoading || !currentQuery.trim()}
-                    className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
-                  >
-                    <Send className="h-4 w-4" />
-                    <span>{isLoading ? 'Processing...' : 'Ask'}</span>
-                  </button>
-                </div>
-                <div className="mt-3 flex items-center space-x-4 text-xs text-gray-500">
-                  <div className="flex items-center space-x-1">
-                    <CheckCircle className="h-3 w-3 text-green-500" />
-                    <span>Multi-chart support</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <BarChart3 className="h-3 w-3 text-blue-500" />
-                    <span>Automatic chart selection</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <Star className="h-3 w-3 text-yellow-500" />
-                    <span>Rate answers to improve quality</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <h3 className="text-lg font-medium text-gray-900 mb-2">
+          {pageName.replace('-', ' ').charAt(0).toUpperCase() + pageName.replace('-', ' ').slice(1)}
+        </h3>
+        <p className="text-gray-500">
+          This page is ready for your content. Connect it to your analytics features.
+        </p>
       </div>
     </div>
   );
 };
 
-export default App;
+function AppContent() {
+  const location = useLocation();
+  
+  // Hide sidebar for individual chat view and new thread to maximize chat space
+  const fullWidthPages = ['/chat', '/new'];
+  const showSidebar = !fullWidthPages.some(path => location.pathname.startsWith(path));
+
+  return (
+    <div className="App flex min-h-screen bg-gray-50">
+      {showSidebar && <Sidebar />}
+      
+      {/* Main content area */}
+      <main className={`${showSidebar ? 'ml-14' : ''} flex-1 min-h-screen bg-white`}>
+        <Routes>
+          {/* Main chat interface routes */}
+          <Route path="/" element={<NewThreadPage />} />
+          <Route path="/new" element={<NewThreadPage />} />
+          <Route path="/chat/:chatId" element={<IndividualChatView />} />
+          
+          {/* Home section routes */}
+          <Route path="/home" element={<HomePage />} />
+          <Route path="/home/recent" element={<RecentConversationsPage />} />
+          <Route path="/home/favorites" element={<FavoritesPage />} />
+          <Route path="/home/shared" element={<SharedPage />} />
+          
+          {/* Discover section routes */}
+          <Route path="/discover" element={<DiscoverPage />} />
+          <Route path="/discover/for-you" element={<DynamicPage />} />
+          <Route path="/discover/tech" element={<DynamicPage />} />
+          <Route path="/discover/science" element={<DynamicPage />} />
+          <Route path="/discover/business" element={<DynamicPage />} />
+          <Route path="/discover/health" element={<DynamicPage />} />
+          <Route path="/discover/sports" element={<DynamicPage />} />
+          <Route path="/discover/entertainment" element={<DynamicPage />} />
+          
+          {/* Spaces section routes */}
+          <Route path="/spaces" element={<SpacesPage />} />
+          <Route path="/spaces/create" element={<DynamicPage />} />
+          <Route path="/spaces/my" element={<DynamicPage />} />
+          <Route path="/spaces/shared" element={<DynamicPage />} />
+          <Route path="/spaces/templates" element={<DynamicPage />} />
+          
+          {/* Account and settings routes */}
+          <Route path="/account" element={<DynamicPage />} />
+          <Route path="/upgrade" element={<DynamicPage />} />
+          <Route path="/install" element={<DynamicPage />} />
+          
+          {/* Catch-all route for dynamic pages */}
+          <Route path="*" element={<DynamicPage />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <ChatProvider>
+      <Router>
+        <AppContent />
+      </Router>
+    </ChatProvider>
+  );
+}
+
+export default App; 
