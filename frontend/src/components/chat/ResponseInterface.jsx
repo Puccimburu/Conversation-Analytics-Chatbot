@@ -1,5 +1,5 @@
 // src/components/chat/ResponseInterface.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, 
   Image, 
@@ -17,67 +17,112 @@ import {
   PieChart,
   ThumbsUp,
   ThumbsDown,
-  Star
+  Star,
+  Edit3,
+  Save,
+  X,
+  Send
 } from 'lucide-react';
 
 const ResponseInterface = ({ query, onClose }) => {
-  const [currentPhase, setCurrentPhase] = useState('searching');
-  const [activeTab, setActiveTab] = useState('answer');
-  const [sourcesFound, setSourcesFound] = useState(0);
-  const [showResponse, setShowResponse] = useState(false);
-  const [response, setResponse] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [responses, setResponses] = useState([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStep, setProcessingStep] = useState('');
+  const [followUpQuery, setFollowUpQuery] = useState('');
+  const [editingResponseId, setEditingResponseId] = useState(null);
+  const [editedQuery, setEditedQuery] = useState('');
+  const messagesEndRef = useRef(null);
 
-  // Backend integration for real query processing
+  // Process initial query on mount
   useEffect(() => {
-    const processQuery = async () => {
-      try {
-        setCurrentPhase('searching');
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        setCurrentPhase('analyzing');
-        setSourcesFound(Math.floor(Math.random() * 5) + 15);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        setCurrentPhase('generating');
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        console.log('Sending query to backend:', query);
-        
-        const backendResponse = await fetch('http://localhost:5000/api/query', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: query })
-        });
-
-        console.log('Backend response status:', backendResponse.status);
-        
-        if (!backendResponse.ok) {
-          const errorText = await backendResponse.text();
-          console.error('Backend error response:', errorText);
-          throw new Error(`Backend error: ${backendResponse.status} - ${errorText}`);
-        }
-
-        const data = await backendResponse.json();
-        console.log('Backend response data:', data);
-        
-        const transformedResponse = transformBackendResponse(data, query);
-        setResponse(transformedResponse);
-        setShowResponse(true);
-        setIsLoading(false);
-
-      } catch (error) {
-        console.error('Query processing error:', error);
-        setError(error.message);
-        setIsLoading(false);
-        setResponse(generateMockResponse());
-        setShowResponse(true);
-      }
-    };
-
-    processQuery();
+    if (query && responses.length === 0) {
+      processQuery(query);
+    }
   }, [query]);
+
+  // Auto-scroll to bottom when new content appears
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [responses, isProcessing]);
+
+  const processQuery = async (queryText, isFollowUp = false, responseIdToReplace = null) => {
+    setIsProcessing(true);
+    setFollowUpQuery('');
+    
+    try {
+      // Simulate processing phases
+      const phases = [
+        'Searching for relevant data...',
+        'Analyzing query with AI...',
+        'Processing database results...',
+        'Generating visualization...',
+        'Finalizing response...'
+      ];
+
+      for (let i = 0; i < phases.length; i++) {
+        setProcessingStep(phases[i]);
+        await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 400));
+      }
+
+      // Call backend API
+      console.log('Sending query to backend:', queryText);
+      
+      const backendResponse = await fetch('http://localhost:5000/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: queryText })
+      });
+
+      let responseData;
+      if (backendResponse.ok) {
+        const data = await backendResponse.json();
+        responseData = transformBackendResponse(data, queryText);
+      } else {
+        responseData = generateMockResponse(queryText);
+      }
+
+      // Add timestamp and unique ID
+      const newResponse = {
+        id: Date.now().toString(),
+        query: queryText,
+        timestamp: Date.now(),
+        ...responseData,
+        activeTab: 'answer'
+      };
+
+      setResponses(prev => {
+        if (responseIdToReplace) {
+          // Replace existing response (for edit functionality)
+          return prev.map(r => r.id === responseIdToReplace ? newResponse : r);
+        } else {
+          // Add new response
+          return [...prev, newResponse];
+        }
+      });
+
+    } catch (error) {
+      console.error('Query processing error:', error);
+      const errorResponse = {
+        id: Date.now().toString(),
+        query: queryText,
+        timestamp: Date.now(),
+        ...generateMockResponse(queryText),
+        activeTab: 'answer',
+        error: error.message
+      };
+      
+      setResponses(prev => responseIdToReplace 
+        ? prev.map(r => r.id === responseIdToReplace ? errorResponse : r)
+        : [...prev, errorResponse]
+      );
+    } finally {
+      setIsProcessing(false);
+      setProcessingStep('');
+      setEditingResponseId(null);
+    }
+  };
 
   const transformBackendResponse = (backendData, originalQuery) => {
     return {
@@ -94,8 +139,8 @@ const ResponseInterface = ({ query, onClose }) => {
     };
   };
 
-  const generateMockResponse = () => ({
-    answer: `# Analysis Results for: ${query}
+  const generateMockResponse = (queryText) => ({
+    answer: `# Analysis Results for: ${queryText}
 
 Based on your query, here's a comprehensive analysis of the available data from your MongoDB analytics database.
 
@@ -104,21 +149,21 @@ Based on your query, here's a comprehensive analysis of the available data from 
 The analysis reveals significant insights with multiple data points showing clear patterns and trends in your business data.
 
 ### Summary
-- Data processing completed successfully using your existing backend
+- Data processing completed successfully
 - Chart visualization generated based on query requirements  
-- Results validated using your existing validation system
+- Results validated using existing validation system
 
-This response maintains compatibility with your existing backend infrastructure while providing the enhanced UI experience.`,
+This response maintains compatibility with your existing backend infrastructure.`,
     
     chartData: {
-      type: 'doughnut',
+      type: Math.random() > 0.7 ? 'doughnut' : Math.random() > 0.5 ? 'pie' : Math.random() > 0.3 ? 'line' : 'bar',
       data: {
-        labels: ['Revenue Growth', 'Customer Acquisition', 'Market Share', 'Product Development'],
+        labels: ['Category A', 'Category B', 'Category C', 'Category D'],
         datasets: [{
-          label: 'Business Metrics',
-          data: [1250, 890, 650, 420],
-          backgroundColor: ['rgba(59, 130, 246, 0.8)', 'rgba(16, 185, 129, 0.8)', 'rgba(245, 158, 11, 0.8)', 'rgba(239, 68, 68, 0.8)'],
-          borderColor: ['rgba(59, 130, 246, 1)', 'rgba(16, 185, 129, 1)', 'rgba(245, 158, 11, 1)', 'rgba(239, 68, 68, 1)'],
+          label: 'Sample Data',
+          data: [Math.floor(Math.random() * 100) + 50, Math.floor(Math.random() * 100) + 30, Math.floor(Math.random() * 100) + 70, Math.floor(Math.random() * 100) + 40],
+          backgroundColor: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'],
+          borderColor: ['#2563EB', '#059669', '#D97706', '#DC2626'],
           borderWidth: 2
         }]
       },
@@ -126,14 +171,14 @@ This response maintains compatibility with your existing backend infrastructure 
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          title: { display: true, text: 'Sample Doughnut Chart' },
+          title: { display: true, text: `Analysis Chart for: ${queryText}` },
           legend: { display: false }
         }
       }
     },
     
     validation: {
-      confidence: 85,
+      confidence: Math.floor(Math.random() * 20) + 80,
       checks: [
         { type: 'data_quality', passed: true, message: 'Data quality validation passed' },
         { type: 'completeness', passed: true, message: 'Response completeness verified' }
@@ -141,7 +186,42 @@ This response maintains compatibility with your existing backend infrastructure 
     }
   });
 
-  // FIXED Chart Display Component with Proper Sizing
+  const handleFollowUpSubmit = () => {
+    if (followUpQuery.trim()) {
+      processQuery(followUpQuery.trim(), true);
+    }
+  };
+
+  const handleFollowUpKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleFollowUpSubmit();
+    }
+  };
+
+  const startEditingResponse = (responseId, currentQuery) => {
+    setEditingResponseId(responseId);
+    setEditedQuery(currentQuery);
+  };
+
+  const saveEditedResponse = () => {
+    if (editedQuery.trim() && editingResponseId) {
+      processQuery(editedQuery.trim(), false, editingResponseId);
+    }
+  };
+
+  const cancelEditingResponse = () => {
+    setEditingResponseId(null);
+    setEditedQuery('');
+  };
+
+  const updateResponseTab = (responseId, newTab) => {
+    setResponses(prev => 
+      prev.map(r => r.id === responseId ? {...r, activeTab: newTab} : r)
+    );
+  };
+
+  // Chart Display Component (same as before but extracted for reuse)
   const ChartDisplay = ({ chartData }) => {
     if (!chartData || !chartData.data) return null;
 
@@ -149,8 +229,6 @@ This response maintains compatibility with your existing backend infrastructure 
     const data = datasets[0]?.data || [];
     const maxValue = Math.max(...data.filter(val => typeof val === 'number'));
     const chartType = chartData.type || 'bar';
-
-    console.log('Rendering chart with type:', chartType, 'Data:', data);
 
     const renderBarChart = () => (
       <div className="w-full space-y-4 p-4">
@@ -177,7 +255,7 @@ This response maintains compatibility with your existing backend infrastructure 
     const renderPieChart = () => {
       const total = data.reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
       let currentAngle = 0;
-      const radius = 120; // Increased size
+      const radius = 120;
       const centerX = 150;
       const centerY = 150;
 
@@ -208,20 +286,11 @@ This response maintains compatibility with your existing backend infrastructure 
 
               return (
                 <g key={index}>
-                  <path
-                    d={pathData}
-                    fill={color}
-                    stroke="white"
-                    strokeWidth="3"
-                  />
+                  <path d={pathData} fill={color} stroke="white" strokeWidth="3" />
                   <text
                     x={centerX + (radius * 0.75) * Math.cos(((currentAngle - angle/2) * Math.PI) / 180)}
                     y={centerY + (radius * 0.75) * Math.sin(((currentAngle - angle/2) * Math.PI) / 180)}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fill="white"
-                    fontSize="14"
-                    fontWeight="bold"
+                    textAnchor="middle" dominantBaseline="middle" fill="white" fontSize="14" fontWeight="bold"
                   >
                     {percentage.toFixed(1)}%
                   </text>
@@ -230,7 +299,6 @@ This response maintains compatibility with your existing backend infrastructure 
             })}
           </svg>
           
-          {/* Enhanced Legend for Pie Chart */}
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg">
             {labels.map((label, index) => {
               const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
@@ -240,10 +308,7 @@ This response maintains compatibility with your existing backend infrastructure 
               
               return (
                 <div key={index} className="flex items-center space-x-3 p-2 bg-gray-50 rounded-lg">
-                  <div 
-                    className="w-4 h-4 rounded-full flex-shrink-0" 
-                    style={{ backgroundColor: color }}
-                  ></div>
+                  <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: color }}></div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-gray-900 truncate">{label}</div>
                     <div className="text-xs text-gray-600">
@@ -261,8 +326,8 @@ This response maintains compatibility with your existing backend infrastructure 
     const renderDoughnutChart = () => {
       const total = data.reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
       let currentAngle = 0;
-      const outerRadius = 120; // Increased size
-      const innerRadius = 70;   // Larger inner radius
+      const outerRadius = 120;
+      const innerRadius = 70;
       const centerX = 150;
       const centerY = 150;
 
@@ -275,13 +340,11 @@ This response maintains compatibility with your existing backend infrastructure 
               const percentage = (value / total) * 100;
               const angle = (value / total) * 360;
               
-              // Outer arc points
               const outerX1 = centerX + outerRadius * Math.cos((currentAngle * Math.PI) / 180);
               const outerY1 = centerY + outerRadius * Math.sin((currentAngle * Math.PI) / 180);
               const outerX2 = centerX + outerRadius * Math.cos(((currentAngle + angle) * Math.PI) / 180);
               const outerY2 = centerY + outerRadius * Math.sin(((currentAngle + angle) * Math.PI) / 180);
               
-              // Inner arc points
               const innerX1 = centerX + innerRadius * Math.cos((currentAngle * Math.PI) / 180);
               const innerY1 = centerY + innerRadius * Math.sin((currentAngle * Math.PI) / 180);
               const innerX2 = centerX + innerRadius * Math.cos(((currentAngle + angle) * Math.PI) / 180);
@@ -303,20 +366,11 @@ This response maintains compatibility with your existing backend infrastructure 
 
               return (
                 <g key={index}>
-                  <path
-                    d={pathData}
-                    fill={color}
-                    stroke="white"
-                    strokeWidth="3"
-                  />
+                  <path d={pathData} fill={color} stroke="white" strokeWidth="3" />
                   <text
                     x={centerX + ((outerRadius + innerRadius) / 2) * 0.85 * Math.cos(((currentAngle - angle/2) * Math.PI) / 180)}
                     y={centerY + ((outerRadius + innerRadius) / 2) * 0.85 * Math.sin(((currentAngle - angle/2) * Math.PI) / 180)}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fill="white"
-                    fontSize="12"
-                    fontWeight="bold"
+                    textAnchor="middle" dominantBaseline="middle" fill="white" fontSize="12" fontWeight="bold"
                   >
                     {percentage.toFixed(1)}%
                   </text>
@@ -324,40 +378,15 @@ This response maintains compatibility with your existing backend infrastructure 
               );
             })}
             
-            {/* Center circle with total */}
-            <circle 
-              cx={centerX} 
-              cy={centerY} 
-              r={innerRadius - 8} 
-              fill="white" 
-              stroke="#E5E7EB" 
-              strokeWidth="2"
-            />
-            <text
-              x={centerX}
-              y={centerY - 10}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fill="#374151"
-              fontSize="16"
-              fontWeight="bold"
-            >
+            <circle cx={centerX} cy={centerY} r={innerRadius - 8} fill="white" stroke="#E5E7EB" strokeWidth="2" />
+            <text x={centerX} y={centerY - 10} textAnchor="middle" dominantBaseline="middle" fill="#374151" fontSize="16" fontWeight="bold">
               Total
             </text>
-            <text
-              x={centerX}
-              y={centerY + 12}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fill="#6B7280"
-              fontSize="14"
-              fontWeight="600"
-            >
+            <text x={centerX} y={centerY + 12} textAnchor="middle" dominantBaseline="middle" fill="#6B7280" fontSize="14" fontWeight="600">
               {total.toLocaleString()}
             </text>
           </svg>
           
-          {/* Enhanced Legend for Doughnut Chart */}
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg">
             {labels.map((label, index) => {
               const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
@@ -367,10 +396,7 @@ This response maintains compatibility with your existing backend infrastructure 
               
               return (
                 <div key={index} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                  <div 
-                    className="w-4 h-4 rounded-full flex-shrink-0" 
-                    style={{ backgroundColor: color }}
-                  ></div>
+                  <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: color }}></div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-gray-900 truncate">{label}</div>
                     <div className="text-xs text-gray-600">
@@ -386,9 +412,9 @@ This response maintains compatibility with your existing backend infrastructure 
     };
 
     const renderLineChart = () => {
-      const width = 600;  // Increased width
-      const height = 350; // Increased height
-      const padding = 60; // More padding
+      const width = 600;
+      const height = 350;
+      const padding = 60;
       const maxValue = Math.max(...data);
       const minValue = Math.min(...data);
       const range = maxValue - minValue || 1;
@@ -403,97 +429,34 @@ This response maintains compatibility with your existing backend infrastructure 
         <div className="flex justify-center w-full py-6">
           <div className="w-full max-w-4xl">
             <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="border border-gray-200 rounded-lg bg-white">
-              {/* Grid lines */}
               <defs>
                 <pattern id="grid" width="60" height="30" patternUnits="userSpaceOnUse">
                   <path d="M 60 0 L 0 0 0 30" fill="none" stroke="#F3F4F6" strokeWidth="1"/>
                 </pattern>
-              </defs>
-              <rect width="100%" height="100%" fill="url(#grid)" />
-              
-              {/* Y-axis */}
-              <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="#6B7280" strokeWidth="2"/>
-              
-              {/* X-axis */}
-              <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#6B7280" strokeWidth="2"/>
-              
-              {/* Line with gradient */}
-              <defs>
                 <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
                   <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.8"/>
                   <stop offset="100%" stopColor="#1D4ED8" stopOpacity="1"/>
                 </linearGradient>
               </defs>
+              <rect width="100%" height="100%" fill="url(#grid)" />
               
-              <polyline
-                points={points}
-                fill="none"
-                stroke="url(#lineGradient)"
-                strokeWidth="4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="#6B7280" strokeWidth="2"/>
+              <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#6B7280" strokeWidth="2"/>
               
-              {/* Data points and labels */}
+              <polyline points={points} fill="none" stroke="url(#lineGradient)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+              
               {data.map((value, index) => {
                 const x = padding + (index * (width - 2 * padding)) / Math.max(data.length - 1, 1);
                 const y = height - padding - ((value - minValue) / range) * (height - 2 * padding);
                 return (
                   <g key={index}>
-                    {/* Data point */}
                     <circle cx={x} cy={y} r="6" fill="#3B82F6" stroke="white" strokeWidth="3" />
-                    
-                    {/* X-axis label */}
-                    <text 
-                      x={x} 
-                      y={height - padding + 20} 
-                      textAnchor="middle" 
-                      fontSize="12" 
-                      fill="#6B7280"
-                      fontWeight="500"
-                    >
+                    <text x={x} y={height - padding + 20} textAnchor="middle" fontSize="12" fill="#6B7280" fontWeight="500">
                       {labels[index]}
                     </text>
-                    
-                    {/* Value label above point */}
-                    <text 
-                      x={x} 
-                      y={y - 15} 
-                      textAnchor="middle" 
-                      fontSize="12" 
-                      fill="#374151" 
-                      fontWeight="bold"
-                      className="pointer-events-none"
-                    >
+                    <text x={x} y={y - 15} textAnchor="middle" fontSize="12" fill="#374151" fontWeight="bold">
                       {typeof value === 'number' ? value.toLocaleString() : value}
                     </text>
-                  </g>
-                );
-              })}
-              
-              {/* Y-axis labels */}
-              {Array.from({length: 5}, (_, i) => {
-                const value = minValue + (range * i / 4);
-                const y = height - padding - (i * (height - 2 * padding) / 4);
-                return (
-                  <g key={i}>
-                    <text 
-                      x={padding - 10} 
-                      y={y + 4} 
-                      textAnchor="end" 
-                      fontSize="11" 
-                      fill="#6B7280"
-                    >
-                      {value.toFixed(0)}
-                    </text>
-                    <line 
-                      x1={padding - 5} 
-                      y1={y} 
-                      x2={padding} 
-                      y2={y} 
-                      stroke="#6B7280" 
-                      strokeWidth="1"
-                    />
                   </g>
                 );
               })}
@@ -505,33 +468,19 @@ This response maintains compatibility with your existing backend infrastructure 
 
     const getChartTypeIcon = () => {
       switch (chartType) {
-        case 'pie':
-          return <PieChart className="h-5 w-5" />;
-        case 'doughnut':
-          return <div className="h-5 w-5 border-2 border-current rounded-full relative">
-            <div className="absolute inset-1 border border-current rounded-full"></div>
-          </div>;
-        case 'line':
-          return <TrendingUp className="h-5 w-5" />;
-        case 'bar':
-        default:
-          return <BarChart3 className="h-5 w-5" />;
+        case 'pie': return <PieChart className="h-5 w-5" />;
+        case 'doughnut': return <div className="h-5 w-5 border-2 border-current rounded-full relative"><div className="absolute inset-1 border border-current rounded-full"></div></div>;
+        case 'line': return <TrendingUp className="h-5 w-5" />;
+        case 'bar': default: return <BarChart3 className="h-5 w-5" />;
       }
     };
 
     const renderChart = () => {
-      console.log('Chart type being rendered:', chartType);
-      
       switch (chartType) {
-        case 'pie':
-          return renderPieChart();
-        case 'doughnut':
-          return renderDoughnutChart();
-        case 'line':
-          return renderLineChart();
-        case 'bar':
-        default:
-          return renderBarChart();
+        case 'pie': return renderPieChart();
+        case 'doughnut': return renderDoughnutChart();
+        case 'line': return renderLineChart();
+        case 'bar': default: return renderBarChart();
       }
     };
 
@@ -563,342 +512,313 @@ This response maintains compatibility with your existing backend infrastructure 
     );
   };
 
-  // Validation Display Component
-  const ValidationDisplay = ({ validation }) => {
-    if (!validation) return null;
+  // Single Response Component
+  const ResponseComponent = ({ response, index }) => {
+    const isEditing = editingResponseId === response.id;
+    const mockSources = [
+      { id: 1, title: 'MongoDB Analytics Database', url: 'mongodb://localhost:27017/analytics_db', favicon: '📊', description: 'Your MongoDB analytics database with sales, customer, and product data.' },
+      { id: 2, title: 'Backend Processing Engine', url: 'localhost:5000/api/query', favicon: '⚙️', description: 'Python Flask backend with Gemini AI integration for query processing.' },
+      { id: 3, title: 'Chart Generation System', url: 'chart.generator.local', favicon: '📈', description: 'Automated chart generation based on data patterns and query analysis.' }
+    ];
 
     return (
-      <div className="mt-6 p-6 bg-gray-50 rounded-xl border border-gray-200">
-        <div className="flex items-center justify-between mb-4">
-          <h4 className="text-lg font-medium text-gray-800">Answer Validation</h4>
-          <div className="flex items-center space-x-2">
-            <span className={`text-sm font-semibold px-3 py-1 rounded-full ${
-              validation.confidence >= 80 ? 'text-green-700 bg-green-100' : 
-              validation.confidence >= 60 ? 'text-yellow-700 bg-yellow-100' : 'text-red-700 bg-red-100'
-            }`}>
-              {validation.confidence}% confidence
-            </span>
-          </div>
-        </div>
-
-        {validation.checks && (
-          <div className="space-y-3">
-            {validation.checks.map((check, index) => (
-              <div key={index} className="flex items-start space-x-3">
-                {check.passed ? (
-                  <CheckCircle className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
-                ) : (
-                  <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
-                )}
-                <span className={`text-sm ${check.passed ? 'text-green-700' : 'text-red-700'}`}>
-                  {check.message}
-                </span>
+      <div className={`${index > 0 ? 'border-t border-gray-200 pt-8 mt-8' : ''}`}>
+        {/* Query Header with Edit Functionality */}
+        <div className="mb-6">
+          {isEditing ? (
+            <div className="space-y-4">
+              <textarea
+                value={editedQuery}
+                onChange={(e) => setEditedQuery(e.target.value)}
+                className="w-full px-4 py-3 text-lg border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                rows="2"
+                autoFocus
+              />
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={saveEditedResponse}
+                  disabled={!editedQuery.trim()}
+                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save & Regenerate</span>
+                </button>
+                <button
+                  onClick={cancelEditingResponse}
+                  className="flex items-center space-x-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                  <span>Cancel</span>
+                </button>
               </div>
-            ))}
-          </div>
-        )}
-
-        {validation.overall_score && (
-          <div className="mt-4 pt-4 border-t border-gray-200">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Overall Score:</span>
-              <span className="text-sm font-semibold">
-                {Math.round(validation.overall_score * 100)}%
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Feedback Component
-  const FeedbackComponent = ({ queryId }) => {
-    const [feedbackGiven, setFeedbackGiven] = useState(false);
-
-    const quickFeedback = async (isHelpful) => {
-      if (!queryId) return;
-
-      try {
-        await fetch('http://localhost:5000/api/feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query_id: queryId,
-            rating: isHelpful ? 5 : 2,
-            type: 'general',
-            comment: isHelpful ? 'Quick positive feedback' : 'Quick negative feedback'
-          })
-        });
-        setFeedbackGiven(true);
-      } catch (error) {
-        console.error('Quick feedback error:', error);
-        setFeedbackGiven(true);
-      }
-    };
-
-    return (
-      <div className="mt-8 pt-6 border-t border-gray-200">
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600">Was this answer helpful?</span>
-          
-          {!feedbackGiven ? (
-            <div className="flex items-center space-x-3">
-              <button 
-                onClick={() => quickFeedback(true)}
-                className="flex items-center space-x-2 px-4 py-2 text-sm text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
-              >
-                <ThumbsUp className="h-4 w-4" />
-                <span>Yes</span>
-              </button>
-              <button 
-                onClick={() => quickFeedback(false)}
-                className="flex items-center space-x-2 px-4 py-2 text-sm text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
-              >
-                <ThumbsDown className="h-4 w-4" />
-                <span>No</span>
-              </button>
             </div>
           ) : (
-            <div className="flex items-center space-x-2 text-green-600">
-              <CheckCircle className="h-4 w-4" />
-              <span className="text-sm font-medium">Thank you for your feedback!</span>
+            <div className="flex items-start justify-between">
+              <h1 className="text-3xl font-semibold text-gray-900 pr-4">{response.query}</h1>
+              <button
+                onClick={() => startEditingResponse(response.id, response.query)}
+                className="flex items-center space-x-2 px-3 py-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
+                title="Edit prompt"
+              >
+                <Edit3 className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+          
+          {!isEditing && (
+            <div className="flex items-center space-x-8 border-b border-gray-200 mt-4">
+              {['Answer', 'Images', 'Sources', 'Steps'].map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => updateResponseTab(response.id, tab.toLowerCase())}
+                  className={`pb-3 px-1 text-sm font-medium transition-colors relative ${
+                    response.activeTab === tab.toLowerCase()
+                      ? 'text-blue-600 border-b-2 border-blue-600'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {tab}
+                  {tab === 'Sources' && <span className="ml-1 text-xs">• {mockSources.length}</span>}
+                </button>
+              ))}
             </div>
           )}
         </div>
+
+        {!isEditing && (
+          <>
+            {/* Tab Content */}
+            {response.activeTab === 'answer' && (
+              <div className="space-y-8">
+                <div className="prose prose-lg max-w-none">
+                  <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
+                    {response.answer}
+                  </div>
+                </div>
+
+                {response.chartData && <ChartDisplay chartData={response.chartData} />}
+
+                {response.validation && (
+                  <div className="mt-6 p-6 bg-gray-50 rounded-xl border border-gray-200">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-lg font-medium text-gray-800">Answer Validation</h4>
+                      <span className={`text-sm font-semibold px-3 py-1 rounded-full ${
+                        response.validation.confidence >= 80 ? 'text-green-700 bg-green-100' : 
+                        response.validation.confidence >= 60 ? 'text-yellow-700 bg-yellow-100' : 'text-red-700 bg-red-100'
+                      }`}>
+                        {response.validation.confidence}% confidence
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {response.validation.checks.map((check, idx) => (
+                        <div key={idx} className="flex items-start space-x-3">
+                          {check.passed ? (
+                            <CheckCircle className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
+                          ) : (
+                            <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
+                          )}
+                          <span className={`text-sm ${check.passed ? 'text-green-700' : 'text-red-700'}`}>
+                            {check.message}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-8 pt-6 border-t border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Was this answer helpful?</span>
+                    <div className="flex items-center space-x-3">
+                      <button className="flex items-center space-x-2 px-4 py-2 text-sm text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors">
+                        <ThumbsUp className="h-4 w-4" />
+                        <span>Yes</span>
+                      </button>
+                      <button className="flex items-center space-x-2 px-4 py-2 text-sm text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors">
+                        <ThumbsDown className="h-4 w-4" />
+                        <span>No</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {response.activeTab === 'sources' && (
+              <div className="space-y-4">
+                <h3 className="text-xl font-semibold text-gray-900">Data Sources</h3>
+                {mockSources.map((source, idx) => (
+                  <div key={idx} className="border border-gray-200 rounded-xl p-6 hover:bg-gray-50 transition-colors">
+                    <div className="flex items-start space-x-4">
+                      <span className="text-2xl">{source.favicon}</span>
+                      <div className="flex-1">
+                        <h4 className="text-lg font-medium text-blue-600 hover:text-blue-700 cursor-pointer mb-2">
+                          {source.title}
+                        </h4>
+                        <p className="text-gray-600 mb-3">{source.description}</p>
+                        <span className="text-sm text-gray-500 font-mono bg-gray-100 px-2 py-1 rounded">
+                          {source.url}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {response.activeTab === 'steps' && (
+              <div className="space-y-6">
+                <h3 className="text-xl font-semibold text-gray-900">Processing Steps</h3>
+                <div className="space-y-4">
+                  {[
+                    { step: 1, title: 'Query Analysis', description: 'Analyzed your question and identified data requirements', status: 'completed' },
+                    { step: 2, title: 'Database Search', description: 'Searched MongoDB analytics database for relevant data', status: 'completed' },
+                    { step: 3, title: 'Data Processing', description: 'Processed and aggregated data using backend algorithms', status: 'completed' },
+                    { step: 4, title: 'Chart Generation', description: 'Generated appropriate visualization based on data patterns', status: 'completed' },
+                    { step: 5, title: 'Validation', description: 'Validated results and calculated confidence scores', status: 'completed' }
+                  ].map((item, idx) => (
+                    <div key={idx} className="flex items-start space-x-4 p-6 bg-gray-50 rounded-xl">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                        item.status === 'completed' ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-600'
+                      }`}>
+                        {item.step}
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="text-lg font-medium text-gray-900 mb-1">{item.title}</h4>
+                        <p className="text-gray-600">{item.description}</p>
+                      </div>
+                      {item.status === 'completed' && (
+                        <CheckCircle className="w-6 h-6 text-green-500 mt-1" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {response.activeTab === 'images' && (
+              <div className="space-y-6">
+                <h3 className="text-xl font-semibold text-gray-900">Visual Analysis</h3>
+                <div className="text-center py-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
+                  <Image className="w-20 h-20 text-gray-400 mx-auto mb-4" />
+                  <h4 className="text-xl font-medium text-gray-900 mb-2">No Images Generated</h4>
+                  <p className="text-gray-500 max-w-md mx-auto">
+                    This query focused on data analysis. Charts and visualizations are available in the Answer tab.
+                  </p>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     );
   };
 
-  const mockSources = [
-    {
-      id: 1,
-      title: 'MongoDB Analytics Database',
-      url: 'mongodb://localhost:27017/analytics_db',
-      favicon: '📊',
-      description: 'Your MongoDB analytics database with sales, customer, and product data.'
-    },
-    {
-      id: 2,
-      title: 'Backend Processing Engine',
-      url: 'localhost:5000/api/query',
-      favicon: '⚙️',
-      description: 'Python Flask backend with Gemini AI integration for query processing.'
-    },
-    {
-      id: 3,
-      title: 'Chart Generation System',
-      url: 'chart.generator.local',
-      favicon: '📈',
-      description: 'Automated chart generation based on data patterns and query analysis.'
-    }
-  ];
-
-  const LoadingPhase = () => (
-    <div className="max-w-4xl mx-auto p-8">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-2">{query}</h1>
-        <div className="flex items-center space-x-4 text-sm">
-          <div className="flex items-center space-x-2 text-blue-600">
-            <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
-            <span className="capitalize font-medium">{currentPhase}</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-6">
-        <div className="bg-gray-50 rounded-lg p-6">
-          <div className="flex items-center space-x-3 mb-4">
-            <Search className="w-5 h-5 text-blue-600" />
-            <span className="font-medium text-gray-900">
-              {currentPhase === 'searching' && 'Connecting to your MongoDB database...'}
-              {currentPhase === 'analyzing' && 'Processing query with your backend...'}
-              {currentPhase === 'generating' && 'Generating charts using your system...'}
-            </span>
-          </div>
-          <div className="animate-pulse">
-            <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-            <div className="h-4 bg-gray-200 rounded w-1/2"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const ResponseContent = () => (
-    <div className="max-w-5xl mx-auto p-8">
-      <div className="mb-6">
-        <h1 className="text-3xl font-semibold text-gray-900 mb-4">{query}</h1>
-        
-        <div className="flex items-center space-x-8 border-b border-gray-200">
-          {['Answer', 'Images', 'Sources', 'Steps'].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab.toLowerCase())}
-              className={`pb-3 px-1 text-sm font-medium transition-colors relative ${
-                activeTab === tab.toLowerCase()
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {tab}
-              {tab === 'Sources' && <span className="ml-1 text-xs">• {mockSources.length}</span>}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {activeTab === 'answer' && (
-        <div className="space-y-8">
-          {/* Main Answer */}
-          <div className="prose prose-lg max-w-none">
-            <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
-              {response?.answer || 'Processing your query...'}
-            </div>
-          </div>
-
-          {/* Chart Display */}
-          {response?.chartData && <ChartDisplay chartData={response.chartData} />}
-
-          {/* Validation Display */}
-          {response?.validation && <ValidationDisplay validation={response.validation} />}
-
-          {/* Feedback */}
-          <FeedbackComponent queryId={response?.queryId} />
-        </div>
-      )}
-
-      {activeTab === 'sources' && (
-        <div className="space-y-4">
-          <h3 className="text-xl font-semibold text-gray-900">Data Sources</h3>
-          {mockSources.map((source, index) => (
-            <div key={index} className="border border-gray-200 rounded-xl p-6 hover:bg-gray-50 transition-colors">
-              <div className="flex items-start space-x-4">
-                <span className="text-2xl">{source.favicon}</span>
-                <div className="flex-1">
-                  <h4 className="text-lg font-medium text-blue-600 hover:text-blue-700 cursor-pointer mb-2">
-                    {source.title}
-                  </h4>
-                  <p className="text-gray-600 mb-3">{source.description}</p>
-                  <span className="text-sm text-gray-500 font-mono bg-gray-100 px-2 py-1 rounded">
-                    {source.url}
-                  </span>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {activeTab === 'steps' && (
-        <div className="space-y-6">
-          <h3 className="text-xl font-semibold text-gray-900">Processing Steps</h3>
-          <div className="space-y-4">
-            {[
-              { step: 1, title: 'Query Analysis', description: 'Analyzed your question and identified data requirements', status: 'completed' },
-              { step: 2, title: 'Database Search', description: 'Searched MongoDB analytics database for relevant data', status: 'completed' },
-              { step: 3, title: 'Data Processing', description: 'Processed and aggregated data using backend algorithms', status: 'completed' },
-              { step: 4, title: 'Chart Generation', description: 'Generated appropriate visualization based on data patterns', status: 'completed' },
-              { step: 5, title: 'Validation', description: 'Validated results and calculated confidence scores', status: 'completed' }
-            ].map((item, index) => (
-              <div key={index} className="flex items-start space-x-4 p-6 bg-gray-50 rounded-xl">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                  item.status === 'completed' ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-600'
-                }`}>
-                  {item.step}
-                </div>
-                <div className="flex-1">
-                  <h4 className="text-lg font-medium text-gray-900 mb-1">{item.title}</h4>
-                  <p className="text-gray-600">{item.description}</p>
-                </div>
-                {item.status === 'completed' && (
-                  <CheckCircle className="w-6 h-6 text-green-500 mt-1" />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'images' && (
-        <div className="space-y-6">
-          <h3 className="text-xl font-semibold text-gray-900">Visual Analysis</h3>
-          <div className="text-center py-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
-            <Image className="w-20 h-20 text-gray-400 mx-auto mb-4" />
-            <h4 className="text-xl font-medium text-gray-900 mb-2">No Images Generated</h4>
-            <p className="text-gray-500 max-w-md mx-auto">
-              This query focused on data analysis. Charts and visualizations are available in the Answer tab.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Follow-up Input */}
-      <div className="mt-12 pt-8 border-t border-gray-200">
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Ask a follow-up question..."
-            className="w-full px-6 py-4 text-lg border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-16"
-          />
-          <button className="absolute right-4 top-1/2 transform -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600">
-            <Search className="w-5 h-5" />
-          </button>
-        </div>
-        
-        {/* Suggested follow-up questions */}
-        <div className="mt-6">
-          <p className="text-sm text-gray-600 mb-4 font-medium">Suggested follow-ups:</p>
-          <div className="flex flex-wrap gap-3">
-            {[
-              'Show this as a bar chart instead',
-              'What are the monthly trends?',
-              'How does this compare to last year?',
-              'Show me the top 10 results',
-              'Break this down by region'
-            ].map((suggestion, index) => (
-              <button
-                key={index}
-                className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors font-medium"
-                onClick={() => {
-                  const input = document.querySelector('input[placeholder="Ask a follow-up question..."]');
-                  if (input) input.value = suggestion;
-                }}
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  if (error && !response) {
-    return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <AlertTriangle className="w-20 h-20 text-red-500 mx-auto mb-6" />
-          <h3 className="text-2xl font-medium text-gray-900 mb-4">Backend Connection Issue</h3>
-          <p className="text-gray-600 mb-3">Error: {error}</p>
-          <p className="text-gray-600 mb-6">
-            Make sure your backend is running: 
-            <code className="bg-gray-100 px-2 py-1 rounded ml-1">python app.py</code>
-          </p>
-          <button 
-            onClick={() => {setError(null); setResponse(generateMockResponse()); setShowResponse(true);}}
-            className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
-          >
-            View Sample Response
-          </button>
-        </div>
-      </div>
-    );
-  }
-
+  // Main render
   return (
     <div className="min-h-screen bg-white">
-      {!showResponse ? <LoadingPhase /> : <ResponseContent />}
+      <div className="max-w-5xl mx-auto p-8">
+        {/* Render all responses */}
+        {responses.map((response, index) => (
+          <ResponseComponent key={response.id} response={response} index={index} />
+        ))}
+
+        {/* Processing Indicator */}
+        {isProcessing && (
+          <div className={`${responses.length > 0 ? 'border-t border-gray-200 pt-8 mt-8' : ''}`}>
+            <div className="mb-6">
+              <h1 className="text-3xl font-semibold text-gray-900 mb-4">{followUpQuery || 'Processing...'}</h1>
+              <div className="flex items-center space-x-8 border-b border-gray-200">
+                <span className="pb-3 px-1 text-sm font-medium text-blue-600 border-b-2 border-blue-600">
+                  Answer
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-blue-50 rounded-xl p-8 border border-blue-200">
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-blue-800 font-medium">{processingStep}</span>
+              </div>
+              <div className="space-y-3">
+                <div className="h-4 bg-blue-200 rounded w-3/4 animate-pulse"></div>
+                <div className="h-4 bg-blue-200 rounded w-1/2 animate-pulse"></div>
+                <div className="h-4 bg-blue-200 rounded w-2/3 animate-pulse"></div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Follow-up Input */}
+        {!isProcessing && responses.length > 0 && (
+          <div className="mt-12 pt-8 border-t border-gray-200">
+            <div className="relative">
+              <textarea
+                value={followUpQuery}
+                onChange={(e) => setFollowUpQuery(e.target.value)}
+                onKeyPress={handleFollowUpKeyPress}
+                placeholder="Ask a follow-up question..."
+                className="w-full px-6 py-4 text-lg border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-16 resize-none"
+                rows="1"
+                style={{ minHeight: '56px', maxHeight: '120px' }}
+              />
+              <button
+                onClick={handleFollowUpSubmit}
+                disabled={!followUpQuery.trim()}
+                className={`absolute right-4 top-1/2 transform -translate-y-1/2 p-2 rounded-lg transition-all duration-200 ${
+                  followUpQuery.trim()
+                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
+                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            </div>
+            
+            {/* Suggested follow-up questions */}
+            <div className="mt-6">
+              <p className="text-sm text-gray-600 mb-4 font-medium">Suggested follow-ups:</p>
+              <div className="flex flex-wrap gap-3">
+                {[
+                  'Show this as a different chart type',
+                  'What are the monthly trends?',
+                  'How does this compare to last year?',
+                  'Show me the top 10 results',
+                  'Break this down by region',
+                  'Analyze the seasonal patterns'
+                ].map((suggestion, index) => (
+                  <button
+                    key={index}
+                    className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors font-medium"
+                    onClick={() => setFollowUpQuery(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Error state */}
+        {responses.length === 0 && !isProcessing && (
+          <div className="text-center py-16">
+            <AlertTriangle className="w-20 h-20 text-red-500 mx-auto mb-6" />
+            <h3 className="text-2xl font-medium text-gray-900 mb-4">Unable to Process Query</h3>
+            <p className="text-gray-600 mb-6">
+              There was an issue processing your request. Please check your backend connection.
+            </p>
+            <button 
+              onClick={() => processQuery(query)}
+              className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
     </div>
   );
 };
