@@ -32,11 +32,22 @@ const ResponseInterface = ({ query, onClose }) => {
   const [editingResponseId, setEditingResponseId] = useState(null);
   const [editedQuery, setEditedQuery] = useState('');
   const messagesEndRef = useRef(null);
+  
+  // FIX: Add ref to track initial query processing
+  const hasProcessedInitialQuery = useRef(false);
 
-  // Process initial query on mount
+  // FIX: Modified useEffect to prevent double execution
   useEffect(() => {
-    if (query && responses.length === 0) {
+    if (query && responses.length === 0 && !hasProcessedInitialQuery.current && !isProcessing) {
+      hasProcessedInitialQuery.current = true;
       processQuery(query);
+    }
+  }, [query]);
+
+  // FIX: Reset the ref when query changes
+  useEffect(() => {
+    if (query) {
+      hasProcessedInitialQuery.current = false;
     }
   }, [query]);
 
@@ -48,6 +59,12 @@ const ResponseInterface = ({ query, onClose }) => {
   }, [responses, isProcessing]);
 
   const processQuery = async (queryText, isFollowUp = false, responseIdToReplace = null) => {
+    // FIX: Add early return if already processing
+    if (isProcessing && !responseIdToReplace) {
+      console.log('Already processing, skipping duplicate request');
+      return;
+    }
+
     setIsProcessing(true);
     setFollowUpQuery('');
     
@@ -217,11 +234,11 @@ This response maintains compatibility with your existing backend infrastructure.
 
   const updateResponseTab = (responseId, newTab) => {
     setResponses(prev => 
-      prev.map(r => r.id === responseId ? {...r, activeTab: newTab} : r)
+      prev.map(r => r.id === responseId ? { ...r, activeTab: newTab } : r)
     );
   };
 
-  // Chart Display Component (same as before but extracted for reuse)
+  // Chart Display Component
   const ChartDisplay = ({ chartData }) => {
     if (!chartData || !chartData.data) return null;
 
@@ -231,18 +248,18 @@ This response maintains compatibility with your existing backend infrastructure.
     const chartType = chartData.type || 'bar';
 
     const renderBarChart = () => (
-      <div className="w-full space-y-4 p-4">
+      <div className="space-y-3">
         {labels.map((label, index) => (
-          <div key={index} className="flex items-center space-x-4">
-            <div className="w-40 text-sm text-gray-700 font-medium" title={label}>
-              {label.length > 20 ? label.substring(0, 20) + '...' : label}
+          <div key={index} className="flex items-center space-x-3">
+            <div className="w-32 text-sm text-gray-700 font-medium truncate" title={label}>
+              {label}
             </div>
-            <div className="flex-1 bg-gray-200 rounded-lg h-12 relative min-w-0">
+            <div className="flex-1 bg-gray-200 rounded-full h-8 relative">
               <div
-                className="bg-blue-500 h-12 rounded-lg flex items-center justify-end pr-4 transition-all duration-700 ease-out relative"
-                style={{ width: `${maxValue > 0 ? Math.max((data[index] / maxValue) * 100, 8) : 8}%` }}
+                className="bg-blue-500 h-8 rounded-full flex items-center justify-end pr-3 transition-all duration-500 ease-out"
+                style={{ width: `${maxValue > 0 ? (data[index] / maxValue) * 100 : 0}%` }}
               >
-                <span className="text-white text-sm font-semibold whitespace-nowrap">
+                <span className="text-white text-xs font-medium">
                   {typeof data[index] === 'number' ? data[index].toLocaleString() : data[index]}
                 </span>
               </div>
@@ -255,70 +272,46 @@ This response maintains compatibility with your existing backend infrastructure.
     const renderPieChart = () => {
       const total = data.reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
       let currentAngle = 0;
-      const radius = 120;
-      const centerX = 150;
-      const centerY = 150;
-
+      const radius = 80;
+      const center = radius + 10;
+      
       return (
-        <div className="flex flex-col items-center w-full py-6">
-          <svg width="300" height="300" viewBox="0 0 300 300" className="max-w-full h-auto">
+        <div className="flex items-center justify-center">
+          <svg width={center * 2} height={center * 2} className="drop-shadow-sm">
             {data.map((value, index) => {
-              if (typeof value !== 'number') return null;
-              
               const percentage = (value / total) * 100;
               const angle = (value / total) * 360;
-              const x1 = centerX + radius * Math.cos((currentAngle * Math.PI) / 180);
-              const y1 = centerY + radius * Math.sin((currentAngle * Math.PI) / 180);
-              const x2 = centerX + radius * Math.cos(((currentAngle + angle) * Math.PI) / 180);
-              const y2 = centerY + radius * Math.sin(((currentAngle + angle) * Math.PI) / 180);
+              const x1 = center + radius * Math.cos((currentAngle - 90) * Math.PI / 180);
+              const y1 = center + radius * Math.sin((currentAngle - 90) * Math.PI / 180);
+              const x2 = center + radius * Math.cos((currentAngle + angle - 90) * Math.PI / 180);
+              const y2 = center + radius * Math.sin((currentAngle + angle - 90) * Math.PI / 180);
               
               const largeArcFlag = angle > 180 ? 1 : 0;
-              const pathData = [
-                `M ${centerX} ${centerY}`,
-                `L ${x1} ${y1}`,
-                `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}`,
-                'Z'
-              ].join(' ');
-
-              const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
-              const color = colors[index % colors.length];
+              const pathData = `M ${center} ${center} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
+              
               currentAngle += angle;
-
+              const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+              
               return (
                 <g key={index}>
-                  <path d={pathData} fill={color} stroke="white" strokeWidth="3" />
+                  <path
+                    d={pathData}
+                    fill={colors[index % colors.length]}
+                    stroke="white"
+                    strokeWidth="2"
+                  />
                   <text
-                    x={centerX + (radius * 0.75) * Math.cos(((currentAngle - angle/2) * Math.PI) / 180)}
-                    y={centerY + (radius * 0.75) * Math.sin(((currentAngle - angle/2) * Math.PI) / 180)}
-                    textAnchor="middle" dominantBaseline="middle" fill="white" fontSize="14" fontWeight="bold"
+                    x={center + (radius * 0.7) * Math.cos((currentAngle - angle/2 - 90) * Math.PI / 180)}
+                    y={center + (radius * 0.7) * Math.sin((currentAngle - angle/2 - 90) * Math.PI / 180)}
+                    textAnchor="middle"
+                    className="fill-white text-xs font-medium"
                   >
-                    {percentage.toFixed(1)}%
+                    {percentage > 5 ? `${percentage.toFixed(1)}%` : ''}
                   </text>
                 </g>
               );
             })}
           </svg>
-          
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg">
-            {labels.map((label, index) => {
-              const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
-              const color = colors[index % colors.length];
-              const percentage = ((data[index] / total) * 100).toFixed(1);
-              const value = data[index];
-              
-              return (
-                <div key={index} className="flex items-center space-x-3 p-2 bg-gray-50 rounded-lg">
-                  <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: color }}></div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{label}</div>
-                    <div className="text-xs text-gray-600">
-                      {typeof value === 'number' ? value.toLocaleString() : value} ({percentage}%)
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
       );
     };
@@ -326,145 +319,414 @@ This response maintains compatibility with your existing backend infrastructure.
     const renderDoughnutChart = () => {
       const total = data.reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
       let currentAngle = 0;
-      const outerRadius = 120;
-      const innerRadius = 70;
-      const centerX = 150;
-      const centerY = 150;
-
+      const outerRadius = 80;
+      const innerRadius = 45;
+      const center = outerRadius + 10;
+      
       return (
-        <div className="flex flex-col items-center w-full py-6">
-          <svg width="300" height="300" viewBox="0 0 300 300" className="max-w-full h-auto">
+        <div className="flex items-center justify-center">
+          <svg width={center * 2} height={center * 2} className="drop-shadow-sm">
             {data.map((value, index) => {
-              if (typeof value !== 'number') return null;
-              
               const percentage = (value / total) * 100;
               const angle = (value / total) * 360;
               
-              const outerX1 = centerX + outerRadius * Math.cos((currentAngle * Math.PI) / 180);
-              const outerY1 = centerY + outerRadius * Math.sin((currentAngle * Math.PI) / 180);
-              const outerX2 = centerX + outerRadius * Math.cos(((currentAngle + angle) * Math.PI) / 180);
-              const outerY2 = centerY + outerRadius * Math.sin(((currentAngle + angle) * Math.PI) / 180);
+              const x1Outer = center + outerRadius * Math.cos((currentAngle - 90) * Math.PI / 180);
+              const y1Outer = center + outerRadius * Math.sin((currentAngle - 90) * Math.PI / 180);
+              const x2Outer = center + outerRadius * Math.cos((currentAngle + angle - 90) * Math.PI / 180);
+              const y2Outer = center + outerRadius * Math.sin((currentAngle + angle - 90) * Math.PI / 180);
               
-              const innerX1 = centerX + innerRadius * Math.cos((currentAngle * Math.PI) / 180);
-              const innerY1 = centerY + innerRadius * Math.sin((currentAngle * Math.PI) / 180);
-              const innerX2 = centerX + innerRadius * Math.cos(((currentAngle + angle) * Math.PI) / 180);
-              const innerY2 = centerY + innerRadius * Math.sin(((currentAngle + angle) * Math.PI) / 180);
+              const x1Inner = center + innerRadius * Math.cos((currentAngle - 90) * Math.PI / 180);
+              const y1Inner = center + innerRadius * Math.sin((currentAngle - 90) * Math.PI / 180);
+              const x2Inner = center + innerRadius * Math.cos((currentAngle + angle - 90) * Math.PI / 180);
+              const y2Inner = center + innerRadius * Math.sin((currentAngle + angle - 90) * Math.PI / 180);
               
               const largeArcFlag = angle > 180 ? 1 : 0;
+              const pathData = `M ${x1Outer} ${y1Outer} A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 1 ${x2Outer} ${y2Outer} L ${x2Inner} ${y2Inner} A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${x1Inner} ${y1Inner} Z`;
               
-              const pathData = [
-                `M ${outerX1} ${outerY1}`,
-                `A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 1 ${outerX2} ${outerY2}`,
-                `L ${innerX2} ${innerY2}`,
-                `A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${innerX1} ${innerY1}`,
-                'Z'
-              ].join(' ');
-
-              const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
-              const color = colors[index % colors.length];
               currentAngle += angle;
-
+              const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+              
               return (
-                <g key={index}>
-                  <path d={pathData} fill={color} stroke="white" strokeWidth="3" />
-                  <text
-                    x={centerX + ((outerRadius + innerRadius) / 2) * 0.85 * Math.cos(((currentAngle - angle/2) * Math.PI) / 180)}
-                    y={centerY + ((outerRadius + innerRadius) / 2) * 0.85 * Math.sin(((currentAngle - angle/2) * Math.PI) / 180)}
-                    textAnchor="middle" dominantBaseline="middle" fill="white" fontSize="12" fontWeight="bold"
-                  >
-                    {percentage.toFixed(1)}%
-                  </text>
-                </g>
+                <path
+                  key={index}
+                  d={pathData}
+                  fill={colors[index % colors.length]}
+                  stroke="white"
+                  strokeWidth="2"
+                />
               );
             })}
-            
-            <circle cx={centerX} cy={centerY} r={innerRadius - 8} fill="white" stroke="#E5E7EB" strokeWidth="2" />
-            <text x={centerX} y={centerY - 10} textAnchor="middle" dominantBaseline="middle" fill="#374151" fontSize="16" fontWeight="bold">
-              Total
-            </text>
-            <text x={centerX} y={centerY + 12} textAnchor="middle" dominantBaseline="middle" fill="#6B7280" fontSize="14" fontWeight="600">
-              {total.toLocaleString()}
+            <text
+              x={center}
+              y={center}
+              textAnchor="middle"
+              className="fill-gray-600 text-sm font-semibold"
+            >
+              Total: {total.toLocaleString()}
             </text>
           </svg>
-          
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg">
-            {labels.map((label, index) => {
-              const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
-              const color = colors[index % colors.length];
-              const percentage = ((data[index] / total) * 100).toFixed(1);
-              const value = data[index];
-              
-              return (
-                <div key={index} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                  <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: color }}></div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{label}</div>
-                    <div className="text-xs text-gray-600">
-                      {typeof value === 'number' ? value.toLocaleString() : value} ({percentage}%)
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
       );
     };
 
     const renderLineChart = () => {
-      const width = 600;
-      const height = 350;
-      const padding = 60;
-      const maxValue = Math.max(...data);
-      const minValue = Math.min(...data);
-      const range = maxValue - minValue || 1;
-      
-      const points = data.map((value, index) => {
-        const x = padding + (index * (width - 2 * padding)) / Math.max(data.length - 1, 1);
-        const y = height - padding - ((value - minValue) / range) * (height - 2 * padding);
-        return `${x},${y}`;
-      }).join(' ');
+    const chartWidth = 800;
+    const chartHeight = 500;
+    const padding = { top: 60, right: 60, bottom: 80, left: 80 };
+    const plotWidth = chartWidth - padding.left - padding.right;
+    const plotHeight = chartHeight - padding.top - padding.bottom;
+    
+    // Calculate data ranges
+    const numericData = data.filter(val => typeof val === 'number');
+    const maxValue = Math.max(...numericData);
+    const minValue = Math.min(...numericData);
+    const range = maxValue - minValue || 1;
+    const yAxisMax = maxValue + (range * 0.1);
+    const yAxisMin = Math.max(0, minValue - (range * 0.1));
+    const adjustedRange = yAxisMax - yAxisMin;
 
-      return (
-        <div className="flex justify-center w-full py-6">
-          <div className="w-full max-w-4xl">
-            <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="border border-gray-200 rounded-lg bg-white">
-              <defs>
-                <pattern id="grid" width="60" height="30" patternUnits="userSpaceOnUse">
-                  <path d="M 60 0 L 0 0 0 30" fill="none" stroke="#F3F4F6" strokeWidth="1"/>
-                </pattern>
-                <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.8"/>
-                  <stop offset="100%" stopColor="#1D4ED8" stopOpacity="1"/>
-                </linearGradient>
-              </defs>
-              <rect width="100%" height="100%" fill="url(#grid)" />
+    // Grid lines
+    const gridLines = 8;
+    const yStep = adjustedRange / gridLines;
+    
+    // Calculate points for the line
+    const linePoints = data.map((value, index) => {
+      const x = padding.left + (index * plotWidth) / Math.max(data.length - 1, 1);
+      const y = padding.top + plotHeight - ((value - yAxisMin) / adjustedRange) * plotHeight;
+      return { x, y, value, label: labels[index] };
+    });
+
+    // Create smooth curve path
+    const createSmoothPath = (points) => {
+      if (points.length < 2) return '';
+      
+      let path = `M ${points[0].x} ${points[0].y}`;
+      
+      for (let i = 1; i < points.length; i++) {
+        const prev = points[i - 1];
+        const curr = points[i];
+        
+        if (i === 1) {
+          const controlX = prev.x + (curr.x - prev.x) * 0.5;
+          path += ` Q ${controlX} ${prev.y} ${curr.x} ${curr.y}`;
+        } else {
+          const prevPrev = points[i - 2];
+          const controlX1 = prev.x + (curr.x - prevPrev.x) * 0.15;
+          const controlY1 = prev.y;
+          const controlX2 = curr.x - (curr.x - prev.x) * 0.15;
+          const controlY2 = curr.y;
+          path += ` C ${controlX1} ${controlY1} ${controlX2} ${controlY2} ${curr.x} ${curr.y}`;
+        }
+      }
+      return path;
+    };
+
+    return (
+      <div className="w-full flex justify-center py-6">
+        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm w-full max-w-5xl">
+          <svg 
+            width="100%" 
+            height={chartHeight} 
+            viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+            className="w-full h-auto"
+            preserveAspectRatio="xMidYMid meet"
+          >
+            {/* Definitions */}
+            <defs>
+              {/* Line gradient */}
+              <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#3B82F6" stopOpacity="1"/>
+                <stop offset="100%" stopColor="#1D4ED8" stopOpacity="1"/>
+              </linearGradient>
               
-              <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="#6B7280" strokeWidth="2"/>
-              <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#6B7280" strokeWidth="2"/>
+              {/* Tooltip shadow */}
+              <filter id="tooltipShadow" x="-50%" y="-50%" width="200%" height="200%">
+                <feDropShadow dx="0" dy="2" stdDeviation="4" floodColor="#000000" floodOpacity="0.25"/>
+              </filter>
+            </defs>
+
+            {/* Chart background */}
+            <rect width={chartWidth} height={chartHeight} fill="#FAFAFA" rx="8"/>
+            
+            {/* Plot area */}
+            <rect 
+              x={padding.left} 
+              y={padding.top} 
+              width={plotWidth} 
+              height={plotHeight} 
+              fill="white"
+              stroke="#E5E7EB"
+              strokeWidth="1"
+            />
+
+            {/* Horizontal grid lines */}
+            {Array.from({ length: gridLines + 1 }, (_, i) => {
+              const value = yAxisMin + (i * yStep);
+              const y = padding.top + plotHeight - (i * plotHeight) / gridLines;
               
-              <polyline points={points} fill="none" stroke="url(#lineGradient)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+              return (
+                <g key={`hgrid-${i}`}>
+                  <line
+                    x1={padding.left}
+                    y1={y}
+                    x2={padding.left + plotWidth}
+                    y2={y}
+                    stroke="#E5E7EB"
+                    strokeWidth="1"
+                    opacity="0.8"
+                  />
+                  {/* Y-axis labels */}
+                  <text
+                    x={padding.left - 15}
+                    y={y + 4}
+                    textAnchor="end"
+                    fontSize="12"
+                    fill="#6B7280"
+                    fontFamily="system-ui, -apple-system, sans-serif"
+                  >
+                    {typeof value === 'number' ? 
+                      (value >= 1000 ? `${(value/1000).toFixed(1)}K` : Math.round(value).toLocaleString())
+                      : value}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Vertical grid lines */}
+            {linePoints.map((point, index) => (
+              <line
+                key={`vgrid-${index}`}
+                x1={point.x}
+                y1={padding.top}
+                x2={point.x}
+                y2={padding.top + plotHeight}
+                stroke="#E5E7EB"
+                strokeWidth="1"
+                opacity="0.6"
+              />
+            ))}
+
+            {/* Main line */}
+            <path
+              d={createSmoothPath(linePoints)}
+              fill="none"
+              stroke="url(#lineGradient)"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+
+            {/* Data points with CSS hover effects */}
+            {linePoints.map((point, index) => (
+              <g key={`point-${index}`} className="group">
+                {/* Data point */}
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r="4"
+                  fill="#3B82F6"
+                  stroke="white"
+                  strokeWidth="2"
+                  className="transition-all duration-200 group-hover:r-6 group-hover:drop-shadow-lg cursor-pointer"
+                  style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.1))' }}
+                />
+
+                {/* Hover tooltip using CSS */}
+                <g className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                  {/* Tooltip background */}
+                  <rect
+                    x={point.x - 35}
+                    y={point.y - 50}
+                    width="70"
+                    height="35"
+                    fill="#1F2937"
+                    rx="6"
+                    filter="url(#tooltipShadow)"
+                  />
+                  {/* Tooltip arrow */}
+                  <polygon
+                    points={`${point.x - 6},${point.y - 15} ${point.x + 6},${point.y - 15} ${point.x},${point.y - 8}`}
+                    fill="#1F2937"
+                  />
+                  {/* Tooltip label */}
+                  <text
+                    x={point.x}
+                    y={point.y - 38}
+                    textAnchor="middle"
+                    fontSize="10"
+                    fill="#9CA3AF"
+                    fontWeight="500"
+                  >
+                    {point.label}
+                  </text>
+                  {/* Tooltip value */}
+                  <text
+                    x={point.x}
+                    y={point.y - 23}
+                    textAnchor="middle"
+                    fontSize="12"
+                    fill="white"
+                    fontWeight="700"
+                  >
+                    {typeof point.value === 'number' ? 
+                      (point.value >= 1000 ? `$${(point.value/1000).toFixed(1)}K` : `$${point.value.toLocaleString()}`)
+                      : point.value}
+                  </text>
+                </g>
+              </g>
+            ))}
+
+            {/* X-axis labels */}
+            {linePoints.map((point, index) => (
+              <text
+                key={`xlabel-${index}`}
+                x={point.x}
+                y={padding.top + plotHeight + 25}
+                textAnchor="middle"
+                fontSize="12"
+                fill="#6B7280"
+                fontFamily="system-ui, -apple-system, sans-serif"
+              >
+                {point.label.length > 8 ? point.label.substring(0, 8) : point.label}
+              </text>
+            ))}
+
+            {/* Chart title */}
+            <text
+              x={chartWidth / 2}
+              y={30}
+              textAnchor="middle"
+              fontSize="16"
+              fill="#1F2937"
+              fontWeight="600"
+              fontFamily="system-ui, -apple-system, sans-serif"
+            >
+              {chartData.options?.plugins?.title?.text || 'Monthly Sales Trends (2024)'}
+            </text>
+
+            {/* Y-axis title */}
+            <text
+              x="20"
+              y={chartHeight / 2}
+              textAnchor="middle"
+              fontSize="12"
+              fill="#6B7280"
+              fontWeight="500"
+              transform={`rotate(-90, 20, ${chartHeight / 2})`}
+              fontFamily="system-ui, -apple-system, sans-serif"
+            >
+              Revenue ($)
+            </text>
+
+            {/* X-axis title */}
+            <text
+              x={chartWidth / 2}
+              y={chartHeight - 20}
+              textAnchor="middle"
+              fontSize="12"
+              fill="#6B7280"
+              fontWeight="500"
+              fontFamily="system-ui, -apple-system, sans-serif"
+            >
+              Time Period
+            </text>
+
+            {/* Trend indicator in top right */}
+            {(() => {
+              const firstValue = numericData[0];
+              const lastValue = numericData[numericData.length - 1];
+              const trend = lastValue > firstValue ? 'up' : lastValue < firstValue ? 'down' : 'stable';
+              const trendColor = trend === 'up' ? '#10B981' : trend === 'down' ? '#EF4444' : '#6B7280';
+              const trendText = trend === 'up' ? 'Rising' : trend === 'down' ? 'Falling' : 'Stable';
+              const trendIcon = trend === 'up' ? '↗' : trend === 'down' ? '↘' : '→';
               
-              {data.map((value, index) => {
-                const x = padding + (index * (width - 2 * padding)) / Math.max(data.length - 1, 1);
-                const y = height - padding - ((value - minValue) / range) * (height - 2 * padding);
-                return (
-                  <g key={index}>
-                    <circle cx={x} cy={y} r="6" fill="#3B82F6" stroke="white" strokeWidth="3" />
-                    <text x={x} y={height - padding + 20} textAnchor="middle" fontSize="12" fill="#6B7280" fontWeight="500">
-                      {labels[index]}
-                    </text>
-                    <text x={x} y={y - 15} textAnchor="middle" fontSize="12" fill="#374151" fontWeight="bold">
-                      {typeof value === 'number' ? value.toLocaleString() : value}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
+              return (
+                <g>
+                  <rect
+                    x={chartWidth - 85}
+                    y={15}
+                    width="70"
+                    height="25"
+                    fill={trendColor}
+                    opacity="0.1"
+                    rx="12"
+                  />
+                  <text
+                    x={chartWidth - 75}
+                    y={30}
+                    fontSize="12"
+                    fill={trendColor}
+                    fontWeight="600"
+                  >
+                    {trendIcon} {trendText}
+                  </text>
+                </g>
+              );
+            })()}
+
+            {/* Chart type indicator */}
+            <g>
+              <circle cx={chartWidth - 25} cy={chartHeight - 25} r="3" fill="#3B82F6"/>
+              <text
+                x={chartWidth - 45}
+                y={chartHeight - 20}
+                fontSize="10"
+                fill="#6B7280"
+                textAnchor="end"
+              >
+                Line Chart
+              </text>
+            </g>
+          </svg>
+          
+          {/* Statistics below chart */}
+          <div className="mt-6 grid grid-cols-4 gap-4 text-center">
+            <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+              <div className="text-lg font-bold text-blue-600">
+                {typeof maxValue === 'number' ? 
+                  (maxValue >= 1000 ? `${(maxValue/1000).toFixed(1)}K` : `${maxValue.toLocaleString()}`)
+                  : maxValue}
+              </div>
+              <div className="text-xs text-blue-700 font-medium">Peak Value</div>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+              <div className="text-lg font-bold text-gray-700">
+                {(() => {
+                  const avg = numericData.reduce((a, b) => a + b, 0) / numericData.length;
+                  return typeof avg === 'number' ? 
+                    (avg >= 1000 ? `${(avg/1000).toFixed(1)}K` : `${Math.round(avg).toLocaleString()}`)
+                    : 'N/A';
+                })()}
+              </div>
+              <div className="text-xs text-gray-600 font-medium">Average</div>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+              <div className="text-lg font-bold text-gray-700">{data.length}</div>
+              <div className="text-xs text-gray-600 font-medium">Data Points</div>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 border border-green-200">
+              <div className="text-lg font-bold text-green-600">
+                {(() => {
+                  const total = numericData.reduce((a, b) => a + b, 0);
+                  return typeof total === 'number' ? 
+                    (total >= 1000 ? `${(total/1000).toFixed(1)}K` : `${total.toLocaleString()}`)
+                    : 'N/A';
+                })()}
+              </div>
+              <div className="text-xs text-green-700 font-medium">Total</div>
+            </div>
+          </div>
+
+          {/* Interaction hint */}
+          <div className="mt-4 text-center">
+            <p className="text-sm text-gray-500">
+              💡 <span className="font-medium">Tip:</span> Hover over data points to see detailed values
+            </p>
           </div>
         </div>
-      );
-    };
+      </div>
+     );
+   };
 
     const getChartTypeIcon = () => {
       switch (chartType) {
@@ -625,87 +887,58 @@ This response maintains compatibility with your existing backend infrastructure.
                     </div>
                   </div>
                 )}
+              </div>
+            )}
 
-                <div className="mt-8 pt-6 border-t border-gray-200">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">Was this answer helpful?</span>
-                    <div className="flex items-center space-x-3">
-                      <button className="flex items-center space-x-2 px-4 py-2 text-sm text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors">
-                        <ThumbsUp className="h-4 w-4" />
-                        <span>Yes</span>
-                      </button>
-                      <button className="flex items-center space-x-2 px-4 py-2 text-sm text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors">
-                        <ThumbsDown className="h-4 w-4" />
-                        <span>No</span>
-                      </button>
-                    </div>
-                  </div>
+            {response.activeTab === 'images' && (
+              <div className="space-y-6">
+                <div className="text-center py-12">
+                  <Image className="w-20 h-20 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500 font-medium">Image analysis not available</p>
+                  <p className="text-sm text-gray-400 mt-2">
+                    Charts and visualizations are available in the Answer tab.
+                  </p>
                 </div>
               </div>
             )}
 
             {response.activeTab === 'sources' && (
               <div className="space-y-4">
-                <h3 className="text-xl font-semibold text-gray-900">Data Sources</h3>
-                {mockSources.map((source, idx) => (
-                  <div key={idx} className="border border-gray-200 rounded-xl p-6 hover:bg-gray-50 transition-colors">
-                    <div className="flex items-start space-x-4">
-                      <span className="text-2xl">{source.favicon}</span>
-                      <div className="flex-1">
-                        <h4 className="text-lg font-medium text-blue-600 hover:text-blue-700 cursor-pointer mb-2">
-                          {source.title}
-                        </h4>
-                        <p className="text-gray-600 mb-3">{source.description}</p>
-                        <span className="text-sm text-gray-500 font-mono bg-gray-100 px-2 py-1 rounded">
-                          {source.url}
-                        </span>
-                      </div>
+                {mockSources.map((source) => (
+                  <div key={source.id} className="flex items-start space-x-4 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                    <div className="text-2xl">{source.favicon}</div>
+                    <div className="flex-1">
+                      <h4 className="font-medium text-gray-900">{source.title}</h4>
+                      <p className="text-sm text-gray-600 mt-1">{source.description}</p>
+                      <div className="text-xs text-gray-500 mt-2 font-mono">{source.url}</div>
                     </div>
+                    <ExternalLink className="h-4 w-4 text-gray-400" />
                   </div>
                 ))}
               </div>
             )}
 
             {response.activeTab === 'steps' && (
-              <div className="space-y-6">
-                <h3 className="text-xl font-semibold text-gray-900">Processing Steps</h3>
-                <div className="space-y-4">
-                  {[
-                    { step: 1, title: 'Query Analysis', description: 'Analyzed your question and identified data requirements', status: 'completed' },
-                    { step: 2, title: 'Database Search', description: 'Searched MongoDB analytics database for relevant data', status: 'completed' },
-                    { step: 3, title: 'Data Processing', description: 'Processed and aggregated data using backend algorithms', status: 'completed' },
-                    { step: 4, title: 'Chart Generation', description: 'Generated appropriate visualization based on data patterns', status: 'completed' },
-                    { step: 5, title: 'Validation', description: 'Validated results and calculated confidence scores', status: 'completed' }
-                  ].map((item, idx) => (
-                    <div key={idx} className="flex items-start space-x-4 p-6 bg-gray-50 rounded-xl">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                        item.status === 'completed' ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-600'
-                      }`}>
-                        {item.step}
-                      </div>
-                      <div className="flex-1">
-                        <h4 className="text-lg font-medium text-gray-900 mb-1">{item.title}</h4>
-                        <p className="text-gray-600">{item.description}</p>
-                      </div>
-                      {item.status === 'completed' && (
-                        <CheckCircle className="w-6 h-6 text-green-500 mt-1" />
-                      )}
+              <div className="space-y-4">
+                {[
+                  { step: 1, title: 'Query Analysis', description: 'Analyzed your natural language question and extracted key parameters.', status: 'completed' },
+                  { step: 2, title: 'Database Query', description: 'Generated and executed MongoDB aggregation pipeline.', status: 'completed' },
+                  { step: 3, title: 'Data Processing', description: 'Processed raw results and prepared for visualization.', status: 'completed' },
+                  { step: 4, title: 'Chart Generation', description: 'Created appropriate chart type and formatted data.', status: 'completed' },
+                  { step: 5, title: 'Response Validation', description: 'Validated results and generated summary insights.', status: 'completed' }
+                ].map((step) => (
+                  <div key={step.step} className="flex items-start space-x-4 p-4 border border-gray-200 rounded-lg">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                      step.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      {step.status === 'completed' ? '✓' : step.step}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {response.activeTab === 'images' && (
-              <div className="space-y-6">
-                <h3 className="text-xl font-semibold text-gray-900">Visual Analysis</h3>
-                <div className="text-center py-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
-                  <Image className="w-20 h-20 text-gray-400 mx-auto mb-4" />
-                  <h4 className="text-xl font-medium text-gray-900 mb-2">No Images Generated</h4>
-                  <p className="text-gray-500 max-w-md mx-auto">
-                    This query focused on data analysis. Charts and visualizations are available in the Answer tab.
-                  </p>
-                </div>
+                    <div className="flex-1">
+                      <h4 className="font-medium text-gray-900">{step.title}</h4>
+                      <p className="text-sm text-gray-600 mt-1">{step.description}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </>
