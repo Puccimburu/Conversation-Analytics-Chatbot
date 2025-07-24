@@ -5,7 +5,6 @@ import { ChatProvider } from './context/ChatContext';
 import Sidebar from './components/layout/Sidebar';
 import MainChatInterface from './components/chat/MainChatInterface';
 import RecentConversationsPage from './components/chat/RecentConversationsPage';
-import IndividualChatView from './components/chat/IndividualChatView';
 import './index.css';
 
 // Enhanced page components with better styling
@@ -220,7 +219,7 @@ function AppContent() {
           {/* Main chat interface routes */}
           <Route path="/" element={<NewThreadPage />} />
           <Route path="/new" element={<NewThreadPage />} />
-          <Route path="/chat/:chatId" element={<IndividualChatView />} />
+          
           
           {/* Home section routes */}
           <Route path="/home" element={<HomePage />} />
