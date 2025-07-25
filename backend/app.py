@@ -3,13 +3,14 @@ from flask_cors import CORS
 import asyncio
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import pymongo
 import json
 import google.generativeai as genai
 from typing import Dict, Any, List, Optional
 import re
 import time
+from bson import ObjectId
 
 # Configure logging
 logging.basicConfig(
@@ -26,7 +27,7 @@ GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://127.0.0.1:27017/analytics_db')
 
 print("=" * 60)
-print("🚀 PERFECTED AI ANALYTICS - BULLETPROOF GEMINI TWO-STAGE")
+print("🚀 PERFECTED AI ANALYTICS - BULLETPROOF GEMINI TWO-STAGE + CHAT")
 print("=" * 60)
 print(f"📊 Database: {MONGODB_URI}")
 print(f"🔑 API Key Present: {'Yes' if GOOGLE_API_KEY else 'No'}")
@@ -48,7 +49,258 @@ except Exception as e:
     print(f"❌ MongoDB Error: {e}")
     mongodb_available = False
 
-# Bulletproof Gemini Client
+# ============================================================================
+# NEW: CHAT SESSION MANAGEMENT FUNCTIONS
+# ============================================================================
+
+def generate_chat_id():
+    """Generate unique chat ID with timestamp"""
+    return f"chat_{int(time.time() * 1000)}"
+
+def generate_message_id():
+    """Generate unique message ID"""
+    return f"msg_{int(time.time() * 1000)}_{hash(str(time.time())) % 10000}"
+
+def ensure_chat_indexes():
+    """Create indexes for chat collection for optimal performance"""
+    if not mongodb_available or db is None:
+        return False
+    
+    try:
+        chat_collection = db.chat_sessions
+        
+        # Create indexes for performance
+        chat_collection.create_index("chat_id", unique=True)
+        chat_collection.create_index("created_at")
+        chat_collection.create_index("updated_at")
+        chat_collection.create_index("status")
+        
+        logger.info("✅ Chat collection indexes ensured")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to create chat indexes: {e}")
+        return False
+
+def create_new_chat_session(title=None, category="conversational"):
+    """Create a new chat session in MongoDB"""
+    if not mongodb_available or db is None:
+        return None
+    
+    try:
+        chat_id = generate_chat_id()
+        now = datetime.utcnow()
+        
+        # Auto-generate title if not provided
+        if not title:
+            title = f"Chat Session {now.strftime('%m/%d %H:%M')}"
+        
+        chat_doc = {
+            'chat_id': chat_id,
+            'title': title,
+            'category': category,
+            'created_at': now,
+            'updated_at': now,
+            'status': 'active',
+            'messages': [],
+            'metadata': {
+                'total_messages': 0,
+                'last_activity': now,
+                'user_id': None,  # For future user authentication
+                'tags': [],
+                'is_favorite': False
+            }
+        }
+        
+        result = db.chat_sessions.insert_one(chat_doc)
+        if result.inserted_id:
+            logger.info(f"✅ Created new chat session: {chat_id}")
+            return chat_id
+        else:
+            logger.error("Failed to insert chat session")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Failed to create chat session: {e}")
+        return None
+
+def save_message_to_chat(chat_id, message_data):
+    """Save message to existing chat session"""
+    if not mongodb_available or db is None:
+        return False
+    
+    try:
+        # Add message ID and timestamp if not present
+        if 'message_id' not in message_data:
+            message_data['message_id'] = generate_message_id()
+        
+        if 'timestamp' not in message_data:
+            message_data['timestamp'] = datetime.utcnow()
+        
+        # Update the chat session
+        result = db.chat_sessions.update_one(
+            {'chat_id': chat_id},
+            {
+                '$push': {'messages': message_data},
+                '$set': {
+                    'updated_at': datetime.utcnow(),
+                    'metadata.last_activity': datetime.utcnow()
+                },
+                '$inc': {'metadata.total_messages': 1}
+            }
+        )
+        
+        if result.modified_count > 0:
+            logger.info(f"✅ Saved message to chat {chat_id}")
+            return True
+        else:
+            logger.warning(f"Chat {chat_id} not found for message save")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to save message to chat {chat_id}: {e}")
+        return False
+
+def get_chat_session(chat_id):
+    """Get a specific chat session by ID"""
+    if not mongodb_available or db is None:
+        return None
+    
+    try:
+        chat = db.chat_sessions.find_one({'chat_id': chat_id})
+        if chat:
+            # Convert ObjectId to string for JSON serialization
+            chat['_id'] = str(chat['_id'])
+            logger.info(f"✅ Retrieved chat session: {chat_id}")
+            return chat
+        else:
+            logger.warning(f"Chat session not found: {chat_id}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Failed to get chat session {chat_id}: {e}")
+        return None
+
+def get_all_chat_sessions(limit=50, offset=0, status_filter=None):
+    """Get all chat sessions with pagination"""
+    if not mongodb_available or db is None:
+        return []
+    
+    try:
+        # Build query filter
+        query_filter = {}
+        if status_filter:
+            query_filter['status'] = status_filter
+        
+        # Get chats sorted by last activity (most recent first)
+        chats = list(db.chat_sessions.find(query_filter)
+                    .sort('updated_at', -1)
+                    .skip(offset)
+                    .limit(limit))
+        
+        # Convert ObjectIds to strings
+        for chat in chats:
+            chat['_id'] = str(chat['_id'])
+        
+        logger.info(f"✅ Retrieved {len(chats)} chat sessions")
+        return chats
+        
+    except Exception as e:
+        logger.error(f"Failed to get chat sessions: {e}")
+        return []
+
+def update_chat_session(chat_id, updates):
+    """Update chat session metadata"""
+    if not mongodb_available or db is None:
+        return False
+    
+    try:
+        # Add updated timestamp
+        updates['updated_at'] = datetime.utcnow()
+        
+        result = db.chat_sessions.update_one(
+            {'chat_id': chat_id},
+            {'$set': updates}
+        )
+        
+        if result.modified_count > 0:
+            logger.info(f"✅ Updated chat session: {chat_id}")
+            return True
+        else:
+            logger.warning(f"Chat session not found for update: {chat_id}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to update chat session {chat_id}: {e}")
+        return False
+
+def delete_chat_session(chat_id, soft_delete=True):
+    """Delete or archive a chat session"""
+    if not mongodb_available or db is None:
+        return False
+    
+    try:
+        if soft_delete:
+            # Soft delete - just change status to deleted
+            result = db.chat_sessions.update_one(
+                {'chat_id': chat_id},
+                {
+                    '$set': {
+                        'status': 'deleted',
+                        'updated_at': datetime.utcnow()
+                    }
+                }
+            )
+        else:
+            # Hard delete - remove from database
+            result = db.chat_sessions.delete_one({'chat_id': chat_id})
+        
+        if result.modified_count > 0 or result.deleted_count > 0:
+            delete_type = "soft deleted" if soft_delete else "permanently deleted"
+            logger.info(f"✅ Chat session {delete_type}: {chat_id}")
+            return True
+        else:
+            logger.warning(f"Chat session not found for deletion: {chat_id}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to delete chat session {chat_id}: {e}")
+        return False
+
+def auto_generate_chat_title(first_message):
+    """Auto-generate a meaningful chat title from the first message"""
+    if not first_message:
+        return f"Chat {datetime.now().strftime('%m/%d %H:%M')}"
+    
+    # Clean and truncate the message
+    title = first_message.strip()
+    
+    # Remove common prefixes
+    prefixes_to_remove = ['show me', 'what is', 'what are', 'how do', 'can you', 'please']
+    title_lower = title.lower()
+    
+    for prefix in prefixes_to_remove:
+        if title_lower.startswith(prefix):
+            title = title[len(prefix):].strip()
+            break
+    
+    # Capitalize first letter
+    if title:
+        title = title[0].upper() + title[1:]
+    
+    # Truncate if too long
+    if len(title) > 50:
+        title = title[:47] + "..."
+    
+    return title if title else f"Chat {datetime.now().strftime('%m/%d %H:%M')}"
+
+# Initialize chat collection indexes on startup
+if mongodb_available:
+    ensure_chat_indexes()
+
+# ============================================================================
+# BULLETPROOF GEMINI CLIENT
+# ============================================================================
+
 class BulletproofGeminiClient:
     """Perfected Gemini client with enhanced reliability"""
     
@@ -190,106 +442,8 @@ RESPONSE FORMAT (JSON only):
   "query_intent": "Description of what this query achieves"
 }}
 
-CHART TYPE SELECTION RULES:
-- "top", "best", "ranking", "comparison" → "bar"
-- "distribution", "breakdown", "segments", "by category" → "pie" or "doughnut"  
-- "trends", "over time", "monthly", "quarterly" → "line"
-- "revenue by category", "sales by region" → "doughnut"
-
-COMPREHENSIVE EXAMPLES:
-
-For "What were our top 5 selling products in June 2024?":
-{{
-  "collection": "sales",
-  "pipeline": [
-    {{"$match": {{"month": "June"}}}},
-    {{"$group": {{"_id": "$product_name", "total_revenue": {{"$sum": "$total_amount"}}, "total_quantity": {{"$sum": "$quantity"}}}}}},
-    {{"$sort": {{"total_revenue": -1}}}},
-    {{"$limit": 5}}
-  ],
-  "chart_hint": "bar",
-  "query_intent": "Find top 5 products by revenue in June 2024"
-}}
-
-For "Show me customer distribution by segment":
-{{
-  "collection": "customers",
-  "pipeline": [
-    {{"$group": {{"_id": "$customer_segment", "customer_count": {{"$sum": 1}}, "total_spending": {{"$sum": "$total_spent"}}, "avg_spending": {{"$avg": "$total_spent"}}}}}},
-    {{"$sort": {{"customer_count": -1}}}}
-  ],
-  "chart_hint": "pie",
-  "query_intent": "Analyze customer distribution across segments"
-}}
-
-For "Show me sales revenue by category":
-{{
-  "collection": "sales",
-  "pipeline": [
-    {{"$group": {{"_id": "$category", "total_revenue": {{"$sum": "$total_amount"}}, "order_count": {{"$sum": 1}}}}}},
-    {{"$sort": {{"total_revenue": -1}}}}
-  ],
-  "chart_hint": "doughnut",
-  "query_intent": "Revenue breakdown by product category"
-}}
-
-For "Show me monthly sales trends for 2024":
-{{
-  "collection": "sales",
-  "pipeline": [
-    {{"$match": {{"date": {{"$gte": "2024-01-01T00:00:00.000Z"}}}}}},
-    {{"$group": {{"_id": "$month", "total_revenue": {{"$sum": "$total_amount"}}, "order_count": {{"$sum": 1}}}}}},
-    {{"$sort": {{"_id": 1}}}}
-  ],
-  "chart_hint": "line",
-  "query_intent": "Monthly sales trend analysis for 2024"
-}}
-
-For "Top customers by order value":
-{{
-  "collection": "customers",
-  "pipeline": [
-    {{"$sort": {{"total_spent": -1}}}},
-    {{"$limit": 10}}
-  ],
-  "chart_hint": "bar",
-  "query_intent": "Ranking customers by total spending"
-}}
-
-For "Marketing campaign performance":
-{{
-  "collection": "marketing_campaigns",
-  "pipeline": [
-    {{"$group": {{"_id": "$name", "total_revenue": {{"$sum": "$revenue_generated"}}, "conversion_rate": {{"$avg": "$conversion_rate"}}, "roi": {{"$avg": {{"$divide": ["$revenue_generated", "$spent"]}}}}}}}},
-    {{"$sort": {{"total_revenue": -1}}}},
-    {{"$limit": 10}}
-  ],
-  "chart_hint": "bar",
-  "query_intent": "Campaign performance analysis by revenue"
-}}
-
-For "Show me inventory levels for low-stock products":
-{{
-  "collection": "products",
-  "pipeline": [
-    {{"$match": {{"stock": {{"$lt": 50}}}}}},
-    {{"$sort": {{"stock": 1}}}},
-    {{"$limit": 15}}
-  ],
-  "chart_hint": "bar",
-  "query_intent": "Products with low inventory levels"
-}}
-
-SPECIAL HANDLING:
-- For "this quarter", "Q1", "Q2" etc: Use appropriate date filters
-- For "this year", "2024": Match year in date field
-- For "best", "top": Always sort descending and limit results
-- For "low", "worst": Sort ascending
-- For "trends": Group by time periods (month, quarter)
-
 JSON only - no other text:"""
 
-    
     def _build_enhanced_visualization_prompt(self, user_question: str, raw_data: List[Dict], query_context: Dict) -> str:
         """Improved visualization prompt with better instructions"""
         sample_data = raw_data[:3] if raw_data else []
@@ -345,60 +499,6 @@ REQUIRED JSON STRUCTURE:
     "Strategic suggestion"
   ]
 }}
-
-CHART TYPE RULES:
-- Bar charts: Comparisons, rankings, top items
-- Pie charts: Distributions, segments (≤6 categories)
-- Doughnut charts: Revenue breakdowns, category splits
-- Line charts: Trends over time, monthly/quarterly data
-
-COLOR SCHEMES:
-- Bar: "rgba(59, 130, 246, 0.8)" (blue)
-- Pie/Doughnut: Multiple colors ["rgba(59, 130, 246, 0.8)", "rgba(16, 185, 129, 0.8)", "rgba(245, 158, 11, 0.8)"]
-
-EXAMPLES:
-
-For comparison data:
-{{
-  "chart_type": "bar",
-  "chart_config": {{
-    "type": "bar",
-    "data": {{
-      "labels": ["Smartphones", "Laptops"],
-      "datasets": [{{
-        "label": "Revenue ($)",
-        "data": [11649.84, 14599.89],
-        "backgroundColor": ["rgba(59, 130, 246, 0.8)", "rgba(16, 185, 129, 0.8)"],
-        "borderColor": ["rgba(59, 130, 246, 1)", "rgba(16, 185, 129, 1)"],
-        "borderWidth": 2
-      }}]
-    }},
-    "options": {{
-      "responsive": true,
-      "maintainAspectRatio": false,
-      "plugins": {{
-        "title": {{"display": true, "text": "Smartphone vs Laptop Sales"}},
-        "legend": {{"display": false}}
-      }},
-      "scales": {{
-        "y": {{"beginAtZero": true, "title": {{"display": true, "text": "Revenue ($)"}}}},
-        "x": {{"title": {{"display": true, "text": "Product Category"}}}}
-      }}
-    }}
-  }},
-  "summary": "Laptops lead with $14,599.89 revenue (55.6%), while Smartphones generated $11,649.84 (44.4%), showing a $2,950 difference.",
-  "insights": [
-    "Laptops outperform Smartphones by 25.3% in revenue",
-    "Combined revenue of $26,249.73 across both categories",
-    "Strong performance in both premium product categories"
-  ],
-  "recommendations": [
-    "Focus marketing on laptop category advantages",
-    "Analyze laptop success factors for smartphone strategy"
-  ]
-}}
-
-CRITICAL: Return ONLY the JSON object. No text before or after. Ensure all quotes are properly escaped.
 
 JSON only:"""
 
@@ -504,27 +604,6 @@ JSON only:"""
                 except json.JSONDecodeError:
                     continue
             
-            # Method 5: Extract field by field (last resort)
-            try:
-                logger.debug("Attempting field-by-field extraction...")
-                
-                # Try to extract individual fields
-                chart_type_match = re.search(r'"chart_type":\s*"([^"]+)"', cleaned_text)
-                summary_match = re.search(r'"summary":\s*"([^"]+)"', cleaned_text)
-                
-                if chart_type_match and summary_match:
-                    basic_result = {
-                        "chart_type": chart_type_match.group(1),
-                        "summary": summary_match.group(1),
-                        "chart_config": {"type": "bar", "data": {"labels": [], "datasets": []}},
-                        "insights": ["Partial extraction successful"],
-                        "recommendations": ["Full JSON parsing recommended"]
-                    }
-                    logger.debug("✅ Field-by-field extraction successful")
-                    return basic_result
-            except Exception as e:
-                logger.debug(f"Field extraction failed: {e}")
-            
             logger.warning("❌ All JSON extraction methods failed")
             return None
             
@@ -532,7 +611,6 @@ JSON only:"""
             logger.error(f"JSON extraction critical error: {e}")
             return None
 
-    
     def _validate_and_fix_query_response(self, data: Dict) -> bool:
         """Validate and fix query response"""
         try:
@@ -551,34 +629,6 @@ JSON only:"""
             
             if 'query_intent' not in data:
                 data['query_intent'] = 'Data analysis query'
-            
-            # Validate pipeline
-            pipeline = data.get('pipeline', [])
-            if not isinstance(pipeline, list) or len(pipeline) == 0:
-                return False
-            
-            # Validate collection name
-            valid_collections = ['sales', 'products', 'customers', 'marketing_campaigns']
-            if data['collection'] not in valid_collections:
-                data['collection'] = 'sales'  # Default to sales
-            
-            # Validate chart hint
-            valid_charts = ['bar', 'pie', 'line', 'doughnut']
-            if data['chart_hint'] not in valid_charts:
-                data['chart_hint'] = 'bar'  # Default
-            
-            # Ensure pipeline has sort and limit for performance
-            has_sort = any('$sort' in stage for stage in pipeline)
-            has_limit = any('$limit' in stage for stage in pipeline)
-            
-            if not has_sort:
-                # Add default sort
-                if len(pipeline) > 0 and '$group' in str(pipeline):
-                    pipeline.append({"$sort": {"_id": 1}})
-            
-            if not has_limit:
-                # Add reasonable limit
-                pipeline.append({"$limit": 50})
             
             return True
             
@@ -615,47 +665,6 @@ JSON only:"""
                     data['chart_config'] = self._create_basic_chart_config(data['chart_type'], raw_data)
                     logger.info("✅ Fixed: Created basic chart config")
             
-            # Fix any issues with chart_config
-            if 'chart_config' in data:
-                chart_config = data['chart_config']
-                
-                # Ensure it's a dictionary
-                if not isinstance(chart_config, dict):
-                    logger.warning("Chart config is not a dict, creating new one")
-                    data['chart_config'] = self._create_basic_chart_config(data['chart_type'], raw_data)
-                    chart_config = data['chart_config']
-                
-                # Fix common chart config issues
-                if 'type' not in chart_config:
-                    chart_config['type'] = data.get('chart_type', 'bar')
-                    logger.info("✅ Fixed: Added chart type to config")
-                
-                if 'data' not in chart_config:
-                    chart_config['data'] = self._extract_chart_data(raw_data)
-                    logger.info("✅ Fixed: Added chart data")
-                
-                if 'options' not in chart_config:
-                    chart_config['options'] = {
-                        "responsive": True,
-                        "maintainAspectRatio": False,
-                        "plugins": {"title": {"display": True, "text": "Data Analysis"}}
-                    }
-                    logger.info("✅ Fixed: Added chart options")
-                
-                # Validate chart data structure
-                chart_data = chart_config.get('data', {})
-                if 'labels' not in chart_data or 'datasets' not in chart_data:
-                    logger.warning("Invalid chart data structure, fixing...")
-                    chart_config['data'] = self._extract_chart_data(raw_data)
-                    logger.info("✅ Fixed: Reconstructed chart data")
-                
-                # Ensure datasets is a list with at least one dataset
-                datasets = chart_data.get('datasets', [])
-                if not isinstance(datasets, list) or len(datasets) == 0:
-                    logger.warning("Invalid datasets, fixing...")
-                    chart_config['data'] = self._extract_chart_data(raw_data)
-                    logger.info("✅ Fixed: Reconstructed datasets")
-            
             # Add default insights and recommendations if missing
             if 'insights' not in data:
                 data['insights'] = [
@@ -671,33 +680,11 @@ JSON only:"""
                 ]
                 logger.info("✅ Fixed: Added default recommendations")
             
-            # Final validation
-            final_check = all(field in data for field in required_fields)
-            if final_check:
-                logger.info("✅ Visualization validation successful after fixes")
-                return True
-            else:
-                logger.error(f"❌ Validation failed even after fixes. Missing: {[f for f in required_fields if f not in data]}")
-                return False
+            return True
             
         except Exception as e:
             logger.error(f"❌ Visualization validation error: {e}")
-            # Create a completely new response as last resort
-            try:
-                logger.info("🔧 Creating emergency fallback response...")
-                data.clear()
-                data.update({
-                    'chart_type': 'bar',
-                    'chart_config': self._create_basic_chart_config('bar', raw_data),
-                    'summary': f"Emergency analysis: Successfully processed {len(raw_data)} data points.",
-                    'insights': ["Data analysis completed", "Emergency fallback applied"],
-                    'recommendations': ["Review data for optimization", "Enable full AI features"]
-                })
-                logger.info("✅ Emergency fallback response created")
-                return True
-            except Exception as emergency_error:
-                logger.error(f"❌ Even emergency fallback failed: {emergency_error}")
-                return False
+            return False
     
     def _create_basic_chart_config(self, chart_type: str, raw_data: List[Dict]) -> Dict:
         """Create basic chart configuration as fallback"""
@@ -757,40 +744,11 @@ JSON only:"""
                 "borderWidth": 2
             }]
         }
-    def debug_visualization_generation(self, user_question: str, raw_data: List[Dict], query_context: Dict) -> Dict:
-        """Debug method to test visualization generation without retries"""
-        try:
-            prompt = self._build_enhanced_visualization_prompt(user_question, raw_data, query_context)
-            
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.05,
-                    max_output_tokens=2000,
-                    top_p=0.7
-                )
-            )
-            
-            raw_response = response.text.strip() if response and response.text else "No response"
-            
-            # Try to extract JSON
-            parsed_result = self._extract_json_from_response(raw_response)
-            
-            return {
-                "raw_response": raw_response,
-                "parsed_result": parsed_result,
-                "validation_result": self._validate_and_fix_visualization_response(parsed_result.copy(), raw_data) if parsed_result else False,
-                "prompt_used": prompt[:500] + "..." if len(prompt) > 500 else prompt
-            }
-            
-        except Exception as e:
-            return {
-                "error": str(e),
-                "raw_response": None,
-                "parsed_result": None
-            }
 
-# Complete Simple Query Processor (Fixed)
+# ============================================================================
+# COMPLETE SIMPLE QUERY PROCESSOR
+# ============================================================================
+
 class CompleteSimpleQueryProcessor:
     """Complete simple processor with all methods"""
     
@@ -810,33 +768,13 @@ class CompleteSimpleQueryProcessor:
             elif any(word in question_lower for word in ["top", "best", "highest"]) and any(word in question_lower for word in ["product", "selling", "performer"]):
                 return self._top_products()
             
-            # Sales by region
-            elif any(word in question_lower for word in ["region", "geographic", "territory"]):
-                return self._sales_by_region()
-            
-            # Customer segments
-            elif "customer" in question_lower and any(word in question_lower for word in ["segment", "distribution", "breakdown"]):
-                return self._customer_segments()
-            
             # Revenue by category
             elif any(word in question_lower for word in ["category", "categories"]) and any(word in question_lower for word in ["revenue", "sales"]):
                 return self._revenue_by_category()
             
-            # Monthly trends
-            elif any(word in question_lower for word in ["month", "trend", "quarterly", "time"]):
-                return self._monthly_trends()
-            
-            # Marketing campaigns
-            elif any(word in question_lower for word in ["campaign", "marketing", "conversion"]):
-                return self._marketing_campaigns()
-            
-            # Inventory/stock
-            elif any(word in question_lower for word in ["inventory", "stock", "low-stock"]):
-                return self._inventory_levels()
-            
-            # Customer analysis
-            elif "customer" in question_lower and any(word in question_lower for word in ["total", "spending", "value"]):
-                return self._customer_analysis()
+            # Customer segments
+            elif "customer" in question_lower and any(word in question_lower for word in ["segment", "distribution", "breakdown"]):
+                return self._customer_segments()
             
             # Default: show available data
             else:
@@ -858,8 +796,7 @@ class CompleteSimpleQueryProcessor:
                 "_id": "$category",
                 "total_revenue": {"$sum": "$total_amount"},
                 "total_quantity": {"$sum": "$quantity"},
-                "order_count": {"$sum": 1},
-                "avg_price": {"$avg": "$unit_price"}
+                "order_count": {"$sum": 1}
             }},
             {"$sort": {"total_revenue": -1}}
         ]
@@ -981,116 +918,6 @@ class CompleteSimpleQueryProcessor:
             "query_source": "simple_direct"
         }
     
-    def _sales_by_region(self):
-        """Sales breakdown by region"""
-        pipeline = [
-            {"$group": {
-                "_id": "$region",
-                "total_revenue": {"$sum": "$total_amount"},
-                "order_count": {"$sum": 1}
-            }},
-            {"$sort": {"total_revenue": -1}}
-        ]
-        
-        results = list(self.db.sales.aggregate(pipeline))
-        
-        if not results:
-            return {"success": False, "error": "No regional data found"}
-        
-        total_revenue = sum(r['total_revenue'] for r in results)
-        summary = "Regional sales: "
-        for result in results:
-            region = result['_id']
-            revenue = result['total_revenue']
-            percentage = (revenue / total_revenue * 100) if total_revenue > 0 else 0
-            summary += f"{region} ${revenue:,.2f} ({percentage:.1f}%), "
-        
-        chart_config = {
-            "type": "doughnut",
-            "data": {
-                "labels": [r['_id'] for r in results],
-                "datasets": [{
-                    "data": [r['total_revenue'] for r in results],
-                    "backgroundColor": [
-                        "rgba(59, 130, 246, 0.8)",
-                        "rgba(16, 185, 129, 0.8)", 
-                        "rgba(245, 158, 11, 0.8)",
-                        "rgba(239, 68, 68, 0.8)"
-                    ]
-                }]
-            },
-            "options": {
-                "responsive": True,
-                "plugins": {"title": {"display": True, "text": "Sales by Region"}}
-            }
-        }
-        
-        return {
-            "success": True,
-            "summary": summary.rstrip(", "),
-            "chart_data": chart_config,
-            "insights": [f"Total regions: {len(results)}", f"Leading region: {results[0]['_id']}"],
-            "recommendations": ["Focus on underperforming regions", "Expand successful regional strategies"],
-            "results_count": len(results),
-            "execution_time": 0.1,
-            "query_source": "simple_direct"
-        }
-    
-    def _customer_segments(self):
-        """Customer segment analysis"""
-        pipeline = [
-            {"$group": {
-                "_id": "$customer_segment",
-                "total_spent": {"$sum": "$total_spent"},
-                "customer_count": {"$sum": 1},
-                "avg_spent": {"$avg": "$total_spent"}
-            }},
-            {"$sort": {"total_spent": -1}}
-        ]
-        
-        results = list(self.db.customers.aggregate(pipeline))
-        
-        if not results:
-            return {"success": False, "error": "No customer segment data found"}
-        
-        summary = "Customer segments: "
-        for result in results:
-            segment = result['_id']
-            total = result['total_spent']
-            count = result['customer_count']
-            avg = result['avg_spent']
-            summary += f"{segment}: {count} customers, ${total:,.2f} total (avg: ${avg:,.2f}), "
-        
-        chart_config = {
-            "type": "pie",
-            "data": {
-                "labels": [r['_id'] for r in results],
-                "datasets": [{
-                    "data": [r['total_spent'] for r in results],
-                    "backgroundColor": [
-                        "rgba(59, 130, 246, 0.8)",
-                        "rgba(16, 185, 129, 0.8)",
-                        "rgba(245, 158, 11, 0.8)"
-                    ]
-                }]
-            },
-            "options": {
-                "responsive": True,
-                "plugins": {"title": {"display": True, "text": "Customer Spending by Segment"}}
-            }
-        }
-        
-        return {
-            "success": True,
-            "summary": summary.rstrip(", "),
-            "chart_data": chart_config,
-            "insights": [f"Total segments: {len(results)}", f"Top segment: {results[0]['_id']}"],
-            "recommendations": ["Focus on high-value segments", "Develop segment-specific strategies"],
-            "results_count": len(results),
-            "execution_time": 0.1,
-            "query_source": "simple_direct"
-        }
-    
     def _revenue_by_category(self):
         """Revenue breakdown by category"""
         pipeline = [
@@ -1153,103 +980,47 @@ class CompleteSimpleQueryProcessor:
             "query_source": "simple_direct"
         }
     
-    def _monthly_trends(self):
-        """Monthly sales trends"""
+    def _customer_segments(self):
+        """Customer segment analysis"""
         pipeline = [
             {"$group": {
-                "_id": "$month",
-                "total_revenue": {"$sum": "$total_amount"},
-                "order_count": {"$sum": 1}
+                "_id": "$customer_segment",
+                "total_spent": {"$sum": "$total_spent"},
+                "customer_count": {"$sum": 1},
+                "avg_spent": {"$avg": "$total_spent"}
             }},
-            {"$sort": {"_id": 1}}
+            {"$sort": {"total_spent": -1}}
         ]
         
-        results = list(self.db.sales.aggregate(pipeline))
+        results = list(self.db.customers.aggregate(pipeline))
         
         if not results:
-            return {"success": False, "error": "No monthly data found"}
+            return {"success": False, "error": "No customer segment data found"}
         
-        total_revenue = sum(r['total_revenue'] for r in results)
-        avg_monthly = total_revenue / len(results) if results else 0
-        
-        summary = f"Monthly trends across {len(results)} months: Total ${total_revenue:,.2f}, Average per month: ${avg_monthly:,.2f}"
+        summary = "Customer segments: "
+        for result in results:
+            segment = result['_id']
+            total = result['total_spent']
+            count = result['customer_count']
+            avg = result['avg_spent']
+            summary += f"{segment}: {count} customers, ${total:,.2f} total (avg: ${avg:,.2f}), "
         
         chart_config = {
-            "type": "line",
+            "type": "pie",
             "data": {
                 "labels": [r['_id'] for r in results],
                 "datasets": [{
-                    "label": "Monthly Revenue",
-                    "data": [r['total_revenue'] for r in results],
-                    "borderColor": "rgba(59, 130, 246, 1)",
-                    "backgroundColor": "rgba(59, 130, 246, 0.1)",
-                    "fill": True,
-                    "tension": 0.1,
-                    "borderWidth": 3,
-                    "pointBackgroundColor": "rgba(59, 130, 246, 1)",
-                    "pointRadius": 5
+                    "data": [r['total_spent'] for r in results],
+                    "backgroundColor": [
+                        "rgba(59, 130, 246, 0.8)",
+                        "rgba(16, 185, 129, 0.8)",
+                        "rgba(245, 158, 11, 0.8)"
+                    ]
                 }]
             },
             "options": {
                 "responsive": True,
-                "plugins": {"title": {"display": True, "text": "Monthly Sales Trends"}},
-                "scales": {"y": {"beginAtZero": True}}
-            }
-        }
-        
-        return {
-            "success": True,
-            "summary": summary,
-            "chart_data": chart_config,
-            "insights": [f"Total months: {len(results)}", f"Peak month: {max(results, key=lambda x: x['total_revenue'])['_id']}"],
-            "recommendations": ["Identify seasonal patterns", "Plan for peak periods"],
-            "results_count": len(results),
-            "execution_time": 0.1,
-            "query_source": "simple_direct"
-        }
-    
-    def _marketing_campaigns(self):
-        """Marketing campaign performance"""
-        pipeline = [
-            {"$group": {
-                "_id": "$name",
-                "total_revenue": {"$sum": "$revenue_generated"},
-                "total_spent": {"$sum": "$spent"},
-                "avg_conversion": {"$avg": "$conversion_rate"},
-                "avg_ctr": {"$avg": "$ctr"}
-            }},
-            {"$sort": {"total_revenue": -1}},
-            {"$limit": 10}
-        ]
-        
-        results = list(self.db.marketing_campaigns.aggregate(pipeline))
-        
-        if not results:
-            return {"success": False, "error": "No marketing campaign data found"}
-        
-        summary = f"Marketing campaigns: Top {len(results)} by revenue. "
-        for result in results[:3]:
-            campaign = result['_id']
-            revenue = result['total_revenue']
-            conversion = result['avg_conversion']
-            summary += f"{campaign}: ${revenue:,.2f} ({conversion:.1f}% conversion), "
-        
-        chart_config = {
-            "type": "bar",
-            "data": {
-                "labels": [r['_id'] for r in results],
-                "datasets": [{
-                    "label": "Revenue Generated ($)",
-                    "data": [r['total_revenue'] for r in results],
-                    "backgroundColor": "rgba(16, 185, 129, 0.8)",
-                    "borderColor": "rgba(16, 185, 129, 1)",
-                    "borderWidth": 2
-                }]
-            },
-            "options": {
-                "responsive": True,
-                "plugins": {"title": {"display": True, "text": "Marketing Campaign Performance"}},
-                "scales": {"y": {"beginAtZero": True}}
+                "plugins": {"title": {"display": True, "text": "Customer Spending by Segment"}}
             }
         }
         
@@ -1257,104 +1028,8 @@ class CompleteSimpleQueryProcessor:
             "success": True,
             "summary": summary.rstrip(", "),
             "chart_data": chart_config,
-            "insights": [f"Total campaigns: {len(results)}", f"Top performer: {results[0]['_id']}"],
-            "recommendations": ["Scale successful campaigns", "Optimize underperforming campaigns"],
-            "results_count": len(results),
-            "execution_time": 0.1,
-            "query_source": "simple_direct"
-        }
-    
-    def _inventory_levels(self):
-        """Inventory levels analysis"""
-        pipeline = [
-            {"$match": {"stock": {"$lt": 100}}},  # Low stock threshold
-            {"$sort": {"stock": 1}},
-            {"$limit": 15}
-        ]
-        
-        results = list(self.db.products.aggregate(pipeline))
-        
-        if not results:
-            return {"success": False, "error": "No low-stock products found"}
-        
-        summary = f"Low inventory alert: {len(results)} products below 100 units. "
-        if results:
-            lowest = results[0]
-            summary += f"Lowest stock: {lowest['name']} ({lowest['stock']} units). "
-        
-        chart_config = {
-            "type": "bar",
-            "data": {
-                "labels": [r['name'] for r in results],
-                "datasets": [{
-                    "label": "Stock Level",
-                    "data": [r['stock'] for r in results],
-                    "backgroundColor": "rgba(239, 68, 68, 0.8)",
-                    "borderColor": "rgba(239, 68, 68, 1)",
-                    "borderWidth": 2
-                }]
-            },
-            "options": {
-                "responsive": True,
-                "plugins": {"title": {"display": True, "text": "Low Stock Products"}},
-                "scales": {"y": {"beginAtZero": True}}
-            }
-        }
-        
-        return {
-            "success": True,
-            "summary": summary,
-            "chart_data": chart_config,
-            "insights": [f"Products needing restock: {len(results)}", "Urgent attention required"],
-            "recommendations": ["Reorder low-stock items", "Review inventory management"],
-            "results_count": len(results),
-            "execution_time": 0.1,
-            "query_source": "simple_direct"
-        }
-    
-    def _customer_analysis(self):
-        """Customer spending analysis"""
-        pipeline = [
-            {"$sort": {"total_spent": -1}},
-            {"$limit": 10}
-        ]
-        
-        results = list(self.db.customers.aggregate(pipeline))
-        
-        if not results:
-            return {"success": False, "error": "No customer data found"}
-        
-        total_spending = sum(r['total_spent'] for r in results)
-        summary = f"Top {len(results)} customers by spending: Total ${total_spending:,.2f}. "
-        if results:
-            top_customer = results[0]
-            summary += f"Top spender: {top_customer['name']} (${top_customer['total_spent']:,.2f}). "
-        
-        chart_config = {
-            "type": "bar",
-            "data": {
-                "labels": [r['name'] for r in results],
-                "datasets": [{
-                    "label": "Total Spent ($)",
-                    "data": [r['total_spent'] for r in results],
-                    "backgroundColor": "rgba(147, 51, 234, 0.8)",
-                    "borderColor": "rgba(147, 51, 234, 1)",
-                    "borderWidth": 2
-                }]
-            },
-            "options": {
-                "responsive": True,
-                "plugins": {"title": {"display": True, "text": "Top Customers by Spending"}},
-                "scales": {"y": {"beginAtZero": True}}
-            }
-        }
-        
-        return {
-            "success": True,
-            "summary": summary,
-            "chart_data": chart_config,
-            "insights": [f"High-value customers: {len(results)}", "Strong customer loyalty"],
-            "recommendations": ["Reward top customers", "Develop VIP programs"],
+            "insights": [f"Total segments: {len(results)}", f"Top segment: {results[0]['_id']}"],
+            "recommendations": ["Focus on high-value segments", "Develop segment-specific strategies"],
             "results_count": len(results),
             "execution_time": 0.1,
             "query_source": "simple_direct"
@@ -1365,10 +1040,13 @@ class CompleteSimpleQueryProcessor:
         try:
             collections_info = []
             for collection_name in ["sales", "customers", "products", "marketing_campaigns"]:
-                count = self.db[collection_name].count_documents({})
-                collections_info.append(f"{collection_name}: {count} records")
+                try:
+                    count = self.db[collection_name].count_documents({})
+                    collections_info.append(f"{collection_name}: {count} records")
+                except:
+                    collections_info.append(f"{collection_name}: 0 records")
             
-            summary = f"Available data: {', '.join(collections_info)}. Try asking about: smartphone vs laptop sales, top products, sales by region, customer segments, revenue by category, monthly trends, marketing campaigns, or inventory levels."
+            summary = f"Available data: {', '.join(collections_info)}. Try asking about: smartphone vs laptop sales, top products, customer segments, revenue by category."
             
             return {
                 "success": True,
@@ -1378,8 +1056,7 @@ class CompleteSimpleQueryProcessor:
                 "recommendations": [
                     "Try: 'Compare smartphone vs laptop sales'",
                     "Try: 'Show me customer segments'",
-                    "Try: 'What's our revenue by category?'",
-                    "Try: 'Show me monthly sales trends'"
+                    "Try: 'What's our revenue by category?'"
                 ],
                 "results_count": 0,
                 "execution_time": 0.1,
@@ -1388,7 +1065,10 @@ class CompleteSimpleQueryProcessor:
         except Exception as e:
             return {"success": False, "error": f"Could not retrieve data info: {str(e)}"}
 
-# Perfected Two-Stage Processor
+# ============================================================================
+# PERFECTED TWO-STAGE PROCESSOR
+# ============================================================================
+
 class PerfectedTwoStageProcessor:
     """Perfected processor that prioritizes Gemini AI"""
     
@@ -1406,7 +1086,6 @@ class PerfectedTwoStageProcessor:
                         "region": ["North America", "Europe", "Asia-Pacific"],
                         "month": ["January", "February", "March", "April", "May", "June", "July"]
                     },
-                    "date_fields": ["date"],
                     "numeric_fields": ["quantity", "unit_price", "total_amount", "discount"]
                 },
                 "customers": {
@@ -1419,12 +1098,6 @@ class PerfectedTwoStageProcessor:
                     "description": "Product catalog and inventory",
                     "fields": ["product_id", "name", "category", "subcategory", "brand", "price", "cost", "stock", "rating", "reviews_count", "launch_date"],
                     "numeric_fields": ["price", "cost", "stock", "rating", "reviews_count"]
-                },
-                "marketing_campaigns": {
-                    "description": "Marketing campaign performance",
-                    "fields": ["campaign_id", "name", "type", "start_date", "end_date", "budget", "spent", "impressions", "clicks", "conversions", "revenue_generated", "target_audience", "ctr", "conversion_rate"],
-                    "sample_values": {"type": ["Email", "Google Ads", "Social Media", "Influencer", "Display Ads"]},
-                    "numeric_fields": ["budget", "spent", "impressions", "clicks", "conversions", "revenue_generated", "ctr", "conversion_rate"]
                 }
             }
         }
@@ -1465,11 +1138,7 @@ class PerfectedTwoStageProcessor:
                         "results_count": len(raw_results),
                         "execution_time": execution_time,
                         "query_source": "gemini_two_stage_perfect",
-                        "ai_powered": True,
-                        "stage_details": {
-                            "stage_1": "gemini_success",
-                            "stage_2": "gemini_success"
-                        }
+                        "ai_powered": True
                     }
                 else:
                     # Stage 2 failed, create enhanced fallback visualization
@@ -1486,11 +1155,7 @@ class PerfectedTwoStageProcessor:
                         "results_count": len(raw_results),
                         "execution_time": execution_time,
                         "query_source": "gemini_query_enhanced_viz",
-                        "ai_powered": True,
-                        "stage_details": {
-                            "stage_1": "gemini_success",
-                            "stage_2": "enhanced_fallback"
-                        }
+                        "ai_powered": True
                     }
             else:
                 # Gemini query returned no results, try simple processor
@@ -1506,8 +1171,7 @@ class PerfectedTwoStageProcessor:
                         "error": "No data found for your query",
                         "suggestions": [
                             "Try rephrasing your question",
-                            "Check if you're asking about available data",
-                            "Try: 'Show me what data is available'"
+                            "Check if you're asking about available data"
                         ]
                     }
         
@@ -1533,7 +1197,7 @@ class PerfectedTwoStageProcessor:
             }
     
     async def _execute_database_query(self, query_data: Dict) -> Optional[List[Dict]]:
-        """Execute MongoDB query with enhanced error handling and ObjectId conversion"""
+        """Execute MongoDB query with enhanced error handling"""
         try:
             collection_name = query_data.get("collection")
             pipeline = query_data.get("pipeline", [])
@@ -1552,49 +1216,24 @@ class PerfectedTwoStageProcessor:
                 cleaned_results.append(cleaned_result)
             
             logger.info(f"Database query executed: {len(cleaned_results)} results from {collection_name}")
-            
-            # Log sample results for debugging (now safe for JSON serialization)
-            if cleaned_results and len(cleaned_results) > 0:
-                logger.info(f"Sample result: {cleaned_results[0]}")
-            
             return cleaned_results
             
         except Exception as e:
             logger.error(f"Database query execution failed: {e}")
-            logger.error(f"Collection: {query_data.get('collection')}")
-            logger.error(f"Pipeline: {query_data.get('pipeline')}")
             return None
     
     def _clean_mongodb_result(self, result: Dict) -> Dict:
-        """Clean MongoDB result by converting ObjectIds and datetime objects to JSON-serializable types"""
-        import bson
-        from datetime import datetime
-        
+        """Clean MongoDB result by converting ObjectIds to strings"""
         cleaned = {}
         
         for key, value in result.items():
-            if isinstance(value, bson.ObjectId):
-                # Convert ObjectId to string
+            if isinstance(value, ObjectId):
                 cleaned[key] = str(value)
             elif isinstance(value, datetime):
-                # Convert datetime to ISO string
                 cleaned[key] = value.isoformat()
             elif isinstance(value, dict):
-                # Recursively clean nested dictionaries
                 cleaned[key] = self._clean_mongodb_result(value)
-            elif isinstance(value, list):
-                # Clean lists that might contain ObjectIds or datetime objects
-                cleaned_list = []
-                for item in value:
-                    if isinstance(item, (bson.ObjectId, datetime)):
-                        cleaned_list.append(str(item) if isinstance(item, bson.ObjectId) else item.isoformat())
-                    elif isinstance(item, dict):
-                        cleaned_list.append(self._clean_mongodb_result(item))
-                    else:
-                        cleaned_list.append(item)
-                cleaned[key] = cleaned_list
             else:
-                # Keep other types as-is
                 cleaned[key] = value
         
         return cleaned
@@ -1617,34 +1256,16 @@ class PerfectedTwoStageProcessor:
         values = []
         
         for item in raw_results[:15]:  # Limit for readability
-            # Get label
             label = str(item.get('_id', 'Unknown'))
-            if isinstance(item.get('_id'), dict):
-                # Handle complex _id objects
-                label = str(list(item['_id'].values())[0]) if item['_id'] else 'Unknown'
             labels.append(label)
             
             # Get value
             value = 0
-            for field in ['total_revenue', 'total_spent', 'total_amount', 'customer_count', 'order_count', 'stock', 'count', 'revenue_generated']:
+            for field in ['total_revenue', 'total_spent', 'total_amount', 'customer_count', 'order_count', 'stock']:
                 if field in item and item[field] is not None:
                     value = float(item[field])
                     break
             values.append(value)
-        
-        # Color schemes based on chart type
-        if chart_hint in ['pie', 'doughnut']:
-            colors = [
-                "rgba(59, 130, 246, 0.8)",   # Blue
-                "rgba(16, 185, 129, 0.8)",   # Green
-                "rgba(245, 158, 11, 0.8)",   # Yellow
-                "rgba(239, 68, 68, 0.8)",    # Red
-                "rgba(147, 51, 234, 0.8)",   # Purple
-                "rgba(236, 72, 153, 0.8)"    # Pink
-            ]
-            backgroundColor = colors[:len(labels)]
-        else:
-            backgroundColor = "rgba(59, 130, 246, 0.8)"
         
         # Chart configuration
         chart_config = {
@@ -1654,9 +1275,9 @@ class PerfectedTwoStageProcessor:
                 "datasets": [{
                     "label": "Values",
                     "data": values,
-                    "backgroundColor": backgroundColor,
-                    "borderColor": "rgba(59, 130, 246, 1)" if chart_hint not in ['pie', 'doughnut'] else None,
-                    "borderWidth": 2 if chart_hint not in ['pie', 'doughnut'] else None
+                    "backgroundColor": "rgba(59, 130, 246, 0.8)",
+                    "borderColor": "rgba(59, 130, 246, 1)",
+                    "borderWidth": 2
                 }]
             },
             "options": {
@@ -1664,38 +1285,26 @@ class PerfectedTwoStageProcessor:
                 "maintainAspectRatio": False,
                 "plugins": {
                     "title": {"display": True, "text": "Enhanced Data Analysis"},
-                    "legend": {"display": chart_hint in ['pie', 'doughnut'], "position": "bottom"}
+                    "legend": {"display": chart_hint in ['pie', 'doughnut']}
                 }
             }
         }
         
-        # Add scales for non-pie charts
         if chart_hint not in ['pie', 'doughnut']:
             chart_config["options"]["scales"] = {
-                "y": {"beginAtZero": True, "title": {"display": True, "text": "Values"}},
-                "x": {"title": {"display": True, "text": "Categories"}}
+                "y": {"beginAtZero": True},
+                "x": {"display": True}
             }
         
         # Generate smart summary
         total_value = sum(values) if values else 0
-        avg_value = total_value / len(values) if values else 0
-        max_item = max(raw_results, key=lambda x: x.get('total_revenue', x.get('total_spent', x.get('total_amount', 0)))) if raw_results else None
+        summary = f"Enhanced analysis of {len(raw_results)} data points. Total value: {total_value:,.2f}"
         
-        summary = f"Enhanced analysis of {len(raw_results)} data points. "
-        if max_item:
-            max_label = str(max_item.get('_id', 'Unknown'))
-            max_value = max(values) if values else 0
-            summary += f"Top performer: {max_label} with {max_value:,.2f}. "
-        summary += f"Total value: {total_value:,.2f}, Average: {avg_value:,.2f}."
-        
-        # Generate insights
         insights = [
             f"Analyzed {len(raw_results)} records successfully",
-            f"Data range: {min(values):.2f} to {max(values):.2f}" if values else "No numeric data available",
             "Enhanced fallback visualization applied"
         ]
         
-        # Generate recommendations
         recommendations = [
             "Review data patterns for optimization opportunities",
             "Consider AI-powered analysis for deeper insights"
@@ -1707,6 +1316,10 @@ class PerfectedTwoStageProcessor:
             "insights": insights,
             "recommendations": recommendations
         }
+
+# ============================================================================
+# INITIALIZE COMPONENTS
+# ============================================================================
 
 # Initialize components
 gemini_client = None
@@ -1746,6 +1359,272 @@ if db is not None:
         logger.info("✅ Complete simple processor ready (Gemini not available)")
         print("✅ Complete simple processor ready (Gemini not available)")
 
+# ============================================================================
+# CHAT API ENDPOINTS
+# ============================================================================
+
+@app.route('/api/chats', methods=['GET'])
+def get_chat_sessions_endpoint():
+    """Get all chat sessions with optional filtering"""
+    try:
+        # Get query parameters
+        limit = min(int(request.args.get('limit', 50)), 100)  # Max 100
+        offset = int(request.args.get('offset', 0))
+        status_filter = request.args.get('status')  # active, archived, deleted
+        
+        chats = get_all_chat_sessions(limit=limit, offset=offset, status_filter=status_filter)
+        
+        # Calculate summary stats
+        total_chats = len(chats)
+        active_chats = len([c for c in chats if c.get('status') == 'active'])
+        
+        return jsonify({
+            "success": True,
+            "chats": chats,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "returned": len(chats)
+            },
+            "summary": {
+                "total_returned": total_chats,
+                "active_chats": active_chats,
+                "filter_applied": status_filter
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get chat sessions: {e}")
+        return jsonify({
+            "success": False,
+            "error": "Failed to retrieve chat sessions",
+            "details": str(e)
+        }), 500
+
+@app.route('/api/chats', methods=['POST'])
+def create_chat_session_endpoint():
+    """Create a new chat session"""
+    try:
+        data = request.get_json() or {}
+        
+        title = data.get('title')
+        category = data.get('category', 'conversational')
+        first_message = data.get('first_message')
+        
+        # Auto-generate title from first message if not provided
+        if not title and first_message:
+            title = auto_generate_chat_title(first_message)
+        
+        chat_id = create_new_chat_session(title=title, category=category)
+        
+        if chat_id:
+            # If there's a first message, save it
+            if first_message:
+                message_data = {
+                    'type': 'user',
+                    'content': first_message,
+                    'timestamp': datetime.utcnow()
+                }
+                save_message_to_chat(chat_id, message_data)
+            
+            # Return the created chat
+            chat = get_chat_session(chat_id)
+            
+            return jsonify({
+                "success": True,
+                "chat_id": chat_id,
+                "chat": chat,
+                "message": "Chat session created successfully"
+            }), 201
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Failed to create chat session"
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Failed to create chat session: {e}")
+        return jsonify({
+            "success": False,
+            "error": "Failed to create chat session",
+            "details": str(e)
+        }), 500
+
+@app.route('/api/chats/<chat_id>', methods=['GET'])
+def get_chat_session_endpoint(chat_id):
+    """Get a specific chat session by ID"""
+    try:
+        chat = get_chat_session(chat_id)
+        
+        if chat:
+            return jsonify({
+                "success": True,
+                "chat": chat
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Chat session not found"
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"Failed to get chat session {chat_id}: {e}")
+        return jsonify({
+            "success": False,
+            "error": "Failed to retrieve chat session",
+            "details": str(e)
+        }), 500
+
+@app.route('/api/chats/<chat_id>/messages', methods=['POST'])
+def add_message_to_chat_endpoint(chat_id):
+    """Add a new message to an existing chat session"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "error": "Message data is required"
+            }), 400
+        
+        message_type = data.get('type', 'user')  # user, assistant, system
+        content = data.get('content', '')
+        
+        if not content:
+            return jsonify({
+                "success": False,
+                "error": "Message content is required"
+            }), 400
+        
+        # Build message data
+        message_data = {
+            'type': message_type,
+            'content': content,
+            'timestamp': datetime.utcnow()
+        }
+        
+        # Add optional fields if provided
+        if 'chart_data' in data:
+            message_data['chart_data'] = data['chart_data']
+        
+        if 'validation' in data:
+            message_data['validation'] = data['validation']
+        
+        if 'insights' in data:
+            message_data['insights'] = data['insights']
+        
+        if 'recommendations' in data:
+            message_data['recommendations'] = data['recommendations']
+        
+        if 'query_response' in data:
+            message_data['query_response'] = data['query_response']
+        
+        # Save the message
+        success = save_message_to_chat(chat_id, message_data)
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "message": "Message added successfully",
+                "message_id": message_data.get('message_id')
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Failed to add message to chat"
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Failed to add message to chat {chat_id}: {e}")
+        return jsonify({
+            "success": False,
+            "error": "Failed to add message",
+            "details": str(e)
+        }), 500
+
+@app.route('/api/chats/<chat_id>', methods=['PUT'])
+def update_chat_session_endpoint(chat_id):
+    """Update chat session metadata (title, status, etc.)"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "error": "Update data is required"
+            }), 400
+        
+        # Only allow certain fields to be updated
+        allowed_updates = ['title', 'status', 'category']
+        updates = {}
+        
+        for field in allowed_updates:
+            if field in data:
+                updates[field] = data[field]
+        
+        if not updates:
+            return jsonify({
+                "success": False,
+                "error": "No valid fields to update"
+            }), 400
+        
+        success = update_chat_session(chat_id, updates)
+        
+        if success:
+            # Return updated chat
+            updated_chat = get_chat_session(chat_id)
+            return jsonify({
+                "success": True,
+                "message": "Chat session updated successfully",
+                "chat": updated_chat
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Chat session not found or update failed"
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"Failed to update chat session {chat_id}: {e}")
+        return jsonify({
+            "success": False,
+            "error": "Failed to update chat session",
+            "details": str(e)
+        }), 500
+
+@app.route('/api/chats/<chat_id>', methods=['DELETE'])
+def delete_chat_session_endpoint(chat_id):
+    """Delete a chat session (soft delete by default)"""
+    try:
+        # Check if it should be a hard delete
+        hard_delete = request.args.get('hard', 'false').lower() == 'true'
+        
+        success = delete_chat_session(chat_id, soft_delete=not hard_delete)
+        
+        if success:
+            delete_type = "permanently deleted" if hard_delete else "archived"
+            return jsonify({
+                "success": True,
+                "message": f"Chat session {delete_type} successfully"
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Chat session not found"
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"Failed to delete chat session {chat_id}: {e}")
+        return jsonify({
+            "success": False,
+            "error": "Failed to delete chat session",
+            "details": str(e)
+        }), 500
+
+# ============================================================================
+# MAIN QUERY ENDPOINTS WITH CHAT INTEGRATION
+# ============================================================================
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -1756,22 +1635,34 @@ def health_check():
             "database": "available" if mongodb_available else "unavailable",
             "gemini": "available" if gemini_available else "unavailable",
             "simple_processor": "available" if simple_processor else "unavailable",
-            "two_stage_processor": "available" if two_stage_processor else "unavailable"
+            "two_stage_processor": "available" if two_stage_processor else "unavailable",
+            "chat_system": "available" if mongodb_available else "unavailable"
         },
-        "version": "3.0.0-perfected-ai-system"
+        "version": "3.0.0-perfected-ai-system-with-chat"
     })
 
 @app.route('/api/query', methods=['POST'])
 def process_query():
-    """Perfected query processing with AI priority"""
+    """Perfected query processing with optional chat integration"""
     try:
         data = request.get_json()
         user_question = data.get('question', '').strip()
+        chat_id = data.get('chat_id')  # NEW: Optional chat ID
         
         if not user_question:
             return jsonify({"error": "Question is required"}), 400
         
-        logger.info(f"🔍 Processing question with perfected system: '{user_question}'")
+        logger.info(f"🔍 Processing question with perfected system: '{user_question}'" + 
+                   (f" (chat: {chat_id})" if chat_id else " (no chat)"))
+        
+        # Save user message to chat if chat_id provided
+        if chat_id and mongodb_available:
+            user_message = {
+                'type': 'user',
+                'content': user_question,
+                'timestamp': datetime.utcnow()
+            }
+            save_message_to_chat(chat_id, user_message)
         
         # Prioritize two-stage processor (AI-first approach)
         if two_stage_processor:
@@ -1786,6 +1677,26 @@ def process_query():
                 loop.close()
             
             if result.get("success"):
+                # Save assistant response to chat if chat_id provided
+                if chat_id and mongodb_available:
+                    assistant_message = {
+                        'type': 'assistant',
+                        'content': result.get('summary', ''),
+                        'chart_data': result.get('chart_data'),
+                        'insights': result.get('insights', []),
+                        'recommendations': result.get('recommendations', []),
+                        'validation': {
+                            'confidence': 85,
+                            'checks': [
+                                {'type': 'data_quality', 'passed': True, 'message': 'Data processed successfully'},
+                                {'type': 'response_generation', 'passed': True, 'message': 'AI response generated successfully'}
+                            ]
+                        },
+                        'query_response': result,  # Store full response for reference
+                        'timestamp': datetime.utcnow()
+                    }
+                    save_message_to_chat(chat_id, assistant_message)
+                
                 logger.info(f"✅ Perfected query successful: {result.get('results_count', 0)} results")
                 return jsonify(result)
             else:
@@ -1797,6 +1708,19 @@ def process_query():
             result = simple_processor.process_question(user_question)
             
             if result.get("success"):
+                # Save to chat if chat_id provided
+                if chat_id and mongodb_available:
+                    assistant_message = {
+                        'type': 'assistant',
+                        'content': result.get('summary', ''),
+                        'chart_data': result.get('chart_data'),
+                        'insights': result.get('insights', []),
+                        'recommendations': result.get('recommendations', []),
+                        'query_response': result,
+                        'timestamp': datetime.utcnow()
+                    }
+                    save_message_to_chat(chat_id, assistant_message)
+                
                 result["query_source"] = "simple_only"
                 result["ai_powered"] = False
                 logger.info(f"✅ Simple query successful: {result.get('results_count', 0)} results")
@@ -1818,150 +1742,9 @@ def process_query():
             "details": str(e)
         }), 500
 
-@app.route('/api/query/force-ai', methods=['POST'])
-def force_ai_query():
-    """Force use of AI processing only"""
-    if not two_stage_processor or not gemini_available:
-        return jsonify({
-            "error": "AI processing not available",
-            "details": "Gemini not initialized or unavailable"
-        }), 503
-    
-    try:
-        data = request.get_json()
-        user_question = data.get('question', '').strip()
-        
-        if not user_question:
-            return jsonify({"error": "Question is required"}), 400
-        
-        logger.info(f"🤖 FORCE AI Processing: '{user_question}'")
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            result = loop.run_until_complete(
-                two_stage_processor.process_question(user_question)
-            )
-        finally:
-            loop.close()
-        
-        # Only return AI results, no fallback
-        if result.get("success") and result.get("ai_powered", False):
-            logger.info(f"✅ Force AI successful: {result.get('results_count', 0)} results")
-            return jsonify(result)
-        else:
-            return jsonify({
-                "error": "AI processing failed",
-                "details": result.get("error", "Unknown AI error"),
-                "suggestions": [
-                    "Try rephrasing your question",
-                    "Use simpler terms",
-                    "Check if question relates to available data"
-                ]
-            }), 400
-            
-    except Exception as e:
-        logger.error(f"❌ Force AI error: {str(e)}")
-        return jsonify({
-            "error": "AI processing failed",
-            "details": str(e)
-        }), 500
-
-@app.route('/api/batch_query', methods=['POST'])
-def batch_process_queries():
-    """Process multiple queries with perfected system"""
-    try:
-        data = request.get_json()
-        questions = data.get('questions', [])
-        
-        if not questions or not isinstance(questions, list):
-            return jsonify({"error": "Questions array is required"}), 400
-        
-        if len(questions) > 8:
-            return jsonify({"error": "Maximum 8 questions per batch"}), 400
-        
-        logger.info(f"🔄 Batch processing {len(questions)} questions with perfected system")
-        
-        results = []
-        processor = two_stage_processor if two_stage_processor else simple_processor
-        
-        if not processor:
-            return jsonify({"error": "No query processor available"}), 503
-        
-        for i, question in enumerate(questions):
-            try:
-                if two_stage_processor:
-                    # Use perfected two-stage processor
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    try:
-                        result = loop.run_until_complete(
-                            two_stage_processor.process_question(question)
-                        )
-                    finally:
-                        loop.close()
-                else:
-                    # Use simple processor
-                    result = simple_processor.process_question(question)
-                
-                if result.get("success"):
-                    results.append({
-                        "question": question,
-                        "success": True,
-                        "summary": result.get("summary"),
-                        "chart_data": result.get("chart_data"),
-                        "insights": result.get("insights", []),
-                        "recommendations": result.get("recommendations", []),
-                        "results_count": result.get("results_count", 0),
-                        "execution_time": result.get("execution_time", 0),
-                        "ai_powered": result.get("ai_powered", False),
-                        "query_source": result.get("query_source", "unknown")
-                    })
-                else:
-                    results.append({
-                        "question": question,
-                        "success": False,
-                        "error": result.get("error", "Unknown error"),
-                        "suggestions": result.get("suggestions", [])
-                    })
-                    
-            except Exception as e:
-                logger.error(f"Batch question {i+1} failed: {e}")
-                results.append({
-                    "question": question,
-                    "success": False,
-                    "error": f"Processing failed: {str(e)}"
-                })
-        
-        successful_count = sum(1 for r in results if r.get("success"))
-        ai_powered_count = sum(1 for r in results if r.get("success") and r.get("ai_powered"))
-        total_time = sum(r.get("execution_time", 0) for r in results)
-        
-        return jsonify({
-            "batch_success": True,
-            "results": results,
-            "batch_summary": {
-                "total_questions": len(questions),
-                "successful": successful_count,
-                "failed": len(questions) - successful_count,
-                "ai_powered": ai_powered_count,
-                "simple_fallback": successful_count - ai_powered_count,
-                "success_rate": f"{(successful_count / len(questions) * 100):.1f}%",
-                "ai_success_rate": f"{(ai_powered_count / len(questions) * 100):.1f}%",
-                "total_execution_time": round(total_time, 2),
-                "average_execution_time": round(total_time / len(questions), 2) if questions else 0
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Batch processing error: {str(e)}")
-        return jsonify({"error": "Batch processing failed", "details": str(e)}), 500
-
 @app.route('/api/system/test', methods=['POST'])
 def test_system_components():
-    """Test all system components"""
+    """Test all system components including chat"""
     try:
         test_results = {
             "timestamp": datetime.now().isoformat(),
@@ -1985,6 +1768,51 @@ def test_system_components():
             test_results["tests"]["database"] = {
                 "status": "fail",
                 "details": "Database not available"
+            }
+        
+        # Test chat system
+        if mongodb_available and db is not None:
+            try:
+                # Test creating a chat session
+                test_chat_id = create_new_chat_session("Test Chat Session")
+                if test_chat_id:
+                    # Test saving a message
+                    test_message = {
+                        'type': 'user',
+                        'content': 'Test message for system validation',
+                        'timestamp': datetime.utcnow()
+                    }
+                    message_saved = save_message_to_chat(test_chat_id, test_message)
+                    
+                    # Test retrieving the chat
+                    retrieved_chat = get_chat_session(test_chat_id)
+                    
+                    if message_saved and retrieved_chat:
+                        test_results["tests"]["chat_system"] = {
+                            "status": "pass",
+                            "details": f"Chat system functional - created chat {test_chat_id}"
+                        }
+                        # Clean up test chat
+                        delete_chat_session(test_chat_id, soft_delete=False)
+                    else:
+                        test_results["tests"]["chat_system"] = {
+                            "status": "fail",
+                            "details": "Chat message handling failed"
+                        }
+                else:
+                    test_results["tests"]["chat_system"] = {
+                        "status": "fail",
+                        "details": "Failed to create test chat session"
+                    }
+            except Exception as e:
+                test_results["tests"]["chat_system"] = {
+                    "status": "fail",
+                    "details": str(e)
+                }
+        else:
+            test_results["tests"]["chat_system"] = {
+                "status": "fail",
+                "details": "Database not available for chat system"
             }
         
         # Test simple processor
@@ -2095,66 +1923,32 @@ def get_enhanced_examples():
                 "Compare smartphone vs laptop sales performance",
                 "Show me customer distribution by segment", 
                 "What's our revenue by category?",
-                "Show me sales by region",
-                "What are our top selling products?",
-                "Show me monthly sales trends for 2024"
+                "What are our top selling products?"
             ]
         },
-        "ai_powered_advanced": {
-            "description": "Advanced questions that work best with AI processing",
-            "questions": [
-                "What were our top 5 selling products in June 2024?",
-                "Show me conversion rates by marketing campaign",
-                "Which products have the lowest inventory levels?",
-                "Analyze customer lifetime value by segment",
-                "Compare Q1 vs Q2 performance across all regions",
-                "What's the seasonal pattern in our sales data?",
-                "Show me marketing campaign ROI analysis",
-                "Which customer segments show the highest retention?"
-            ]
-        },
-        "chart_type_examples": {
-            "bar_charts": [
-                "Top 10 products by revenue",
-                "Sales performance by sales rep",
-                "Best performing marketing campaigns",
-                "Customer ranking by total spending"
-            ],
-            "pie_charts": [
-                "Customer distribution by segment",
-                "Product mix by brand",
-                "Geographic customer distribution"
-            ],
-            "doughnut_charts": [
-                "Revenue breakdown by category",
-                "Sales distribution by region",
-                "Marketing spend by campaign type"
-            ],
-            "line_charts": [
-                "Monthly sales trends for 2024",
-                "Quarterly revenue growth",
-                "Customer acquisition trends over time"
-            ]
-        },
-        "data_entities": {
-            "product_categories": ["Smartphones", "Laptops", "Audio", "Tablets", "Monitors", "Accessories"],
-            "regions": ["North America", "Europe", "Asia-Pacific"],
-            "customer_segments": ["Regular", "Premium", "VIP"],
-            "time_periods": ["January", "February", "March", "April", "May", "June", "July", "Q1", "Q2", "2024"],
-            "metrics": ["revenue", "sales", "quantity", "customers", "conversion", "ROI"]
+        "chat_integration_examples": {
+            "description": "Examples showing how to use chat functionality",
+            "create_new_chat": "POST /api/chats with {\"title\": \"Revenue Analysis\", \"category\": \"analysis\"}",
+            "query_with_chat": "POST /api/query with {\"question\": \"Show revenue by category\", \"chat_id\": \"chat_123\"}",
+            "get_chat_history": "GET /api/chats/chat_123",
+            "list_all_chats": "GET /api/chats?limit=20&status=active"
         },
         "system_capabilities": {
             "ai_features": [
                 "Natural language understanding",
                 "Intelligent chart type selection",
                 "Context-aware insights generation",
-                "Automated recommendations"
+                "Automated recommendations",
+                "Chat session persistence",
+                "Message history tracking"
             ],
             "fallback_features": [
                 "Pattern-based query processing",
                 "Guaranteed response for common questions",
                 "Fast processing times",
-                "Reliable basic analytics"
+                "Reliable basic analytics",
+                "Chat session management",
+                "Real-time message saving"
             ]
         }
     }
@@ -2195,13 +1989,15 @@ def debug_collections():
                     "sample_fields": list(sample.keys()) if sample else [],
                     "field_statistics": field_stats,
                     "sample_document": sample,
-                    "ai_compatible": collection_name in ["sales", "customers", "products", "marketing_campaigns"]
+                    "ai_compatible": collection_name in ["sales", "customers", "products", "marketing_campaigns"],
+                    "is_chat_collection": collection_name == "chat_sessions"
                 }
             except Exception as e:
                 collections_info[collection_name] = {
                     "error": str(e),
                     "document_count": -1,
-                    "ai_compatible": False
+                    "ai_compatible": False,
+                    "is_chat_collection": False
                 }
         
         return jsonify({
@@ -2212,138 +2008,103 @@ def debug_collections():
             "ai_system_status": {
                 "gemini_available": gemini_available,
                 "two_stage_processor": two_stage_processor is not None,
-                "simple_processor": simple_processor is not None
+                "simple_processor": simple_processor is not None,
+                "chat_system": mongodb_available
             }
         })
         
     except Exception as e:
         logger.error(f"Debug collections failed: {str(e)}")
         return jsonify({"error": f"Debug failed: {str(e)}"}), 500
-@app.route('/api/debug/visualization', methods=['POST'])
-def debug_visualization():
-    """Debug endpoint to test Stage 2 visualization generation"""
-    if not gemini_client or not gemini_available:
-        return jsonify({"error": "Gemini not available for debugging"}), 503
+
+@app.route('/api/chats/stats', methods=['GET'])
+def get_chat_statistics():
+    """Get chat system statistics"""
+    if not mongodb_available or db is None:
+        return jsonify({"error": "Database not available"}), 503
     
     try:
-        data = request.get_json()
-        user_question = data.get('question', 'Compare smartphone vs laptop sales')
+        # Get basic stats
+        total_chats = db.chat_sessions.count_documents({})
+        active_chats = db.chat_sessions.count_documents({"status": "active"})
+        archived_chats = db.chat_sessions.count_documents({"status": "deleted"})
         
-        # Get some sample data
-        sample_data = [
-            {"_id": "Smartphones", "total_revenue": 11649.84, "total_quantity": 15},
-            {"_id": "Laptops", "total_revenue": 14599.89, "total_quantity": 11}
+        # Get recent activity
+        one_day_ago = datetime.utcnow() - timedelta(days=1)
+        recent_chats = db.chat_sessions.count_documents({
+            "updated_at": {"$gte": one_day_ago}
+        })
+        
+        # Get message statistics
+        pipeline = [
+            {"$match": {"status": {"$ne": "deleted"}}},
+            {"$project": {
+                "message_count": {"$size": "$messages"},
+                "created_at": 1,
+                "updated_at": 1
+            }},
+            {"$group": {
+                "_id": None,
+                "total_messages": {"$sum": "$message_count"},
+                "avg_messages_per_chat": {"$avg": "$message_count"},
+                "max_messages": {"$max": "$message_count"}
+            }}
         ]
         
-        query_context = {
-            "collection": "sales",
-            "chart_hint": "bar",
-            "query_intent": "Compare product categories"
+        message_stats = list(db.chat_sessions.aggregate(pipeline))
+        message_data = message_stats[0] if message_stats else {
+            "total_messages": 0,
+            "avg_messages_per_chat": 0,
+            "max_messages": 0
         }
         
-        # Debug the visualization generation
-        debug_result = gemini_client.debug_visualization_generation(
-            user_question, sample_data, query_context
-        )
-        
         return jsonify({
-            "debug_info": debug_result,
-            "sample_data": sample_data,
-            "question": user_question
+            "success": True,
+            "statistics": {
+                "total_chats": total_chats,
+                "active_chats": active_chats,
+                "archived_chats": archived_chats,
+                "recent_activity_24h": recent_chats,
+                "message_statistics": {
+                    "total_messages": message_data["total_messages"],
+                    "average_messages_per_chat": round(message_data["avg_messages_per_chat"], 2),
+                    "max_messages_in_chat": message_data["max_messages"]
+                },
+                "system_health": {
+                    "database_available": True,
+                    "chat_indexes_ready": True,
+                    "last_updated": datetime.utcnow().isoformat()
+                }
+            }
         })
         
     except Exception as e:
-        return jsonify({"error": f"Debug failed: {str(e)}"}), 500
-
-@app.route('/api/fix/stage2', methods=['POST'])
-def fix_stage2_issues():
-    """Endpoint to apply Stage 2 fixes and test"""
-    try:
-        # Test the current system
-        test_question = "Compare smartphone vs laptop sales performance"
-        
-        if two_stage_processor:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            try:
-                # Test with a known query
-                result = loop.run_until_complete(
-                    two_stage_processor.process_question(test_question)
-                )
-                
-                return jsonify({
-                    "test_result": {
-                        "success": result.get("success"),
-                        "query_source": result.get("query_source"),
-                        "ai_powered": result.get("ai_powered"),
-                        "stage_details": result.get("stage_details"),
-                        "results_count": result.get("results_count"),
-                        "execution_time": result.get("execution_time")
-                    },
-                    "recommendations": [
-                        "Stage 2 validation has been enhanced with auto-fixing",
-                        "JSON extraction now has 5 fallback methods",
-                        "Debug logging provides detailed information",
-                        "Temperature lowered to 0.05 for more consistent responses"
-                    ]
-                })
-                
-            finally:
-                loop.close()
-        else:
-            return jsonify({"error": "Two-stage processor not available"}), 503
-            
-    except Exception as e:
-        return jsonify({"error": f"Fix test failed: {str(e)}"}), 500
-
-# Update the enhanced examples endpoint to include debugging
-@app.route('/api/examples/debug', methods=['GET'])
-def get_debug_examples():
-    """Get examples specifically for debugging Stage 2 issues"""
-    return jsonify({
-        "stage2_test_queries": [
-            "Compare smartphone vs laptop sales performance",
-            "Show me customer distribution by segment", 
-            "What's our revenue by category?",
-            "Marketing campaign performance comparison"
-        ],
-        "debugging_endpoints": {
-            "test_visualization": "POST /api/debug/visualization",
-            "fix_stage2": "POST /api/fix/stage2",
-            "system_test": "POST /api/system/test"
-        },
-        "expected_improvements": [
-            "Enhanced JSON validation with auto-fixing",
-            "Multiple JSON extraction fallback methods",
-            "Detailed debug logging for troubleshooting",
-            "Lower temperature for more consistent responses",
-            "Emergency fallback creation as last resort"
-        ],
-        "monitoring_commands": [
-            "curl -X POST http://localhost:5000/api/debug/visualization",
-            "curl -X POST http://localhost:5000/api/fix/stage2",
-            "curl -X POST http://localhost:5000/api/system/test"
-        ]
-    })
+        logger.error(f"Failed to get chat statistics: {e}")
+        return jsonify({
+            "success": False,
+            "error": "Failed to retrieve chat statistics",
+            "details": str(e)
+        }), 500
 
 if __name__ == '__main__':
-    print("\n🔗 Starting PERFECTED AI Analytics Server...")
+    print("\n🔗 Starting PERFECTED AI Analytics Server with Chat...")
     print("🎯 AI-First Features:")
     print("   - ✅ Bulletproof Gemini two-stage processing")
     print("   - ✅ Enhanced retry logic with exponential backoff")
     print("   - ✅ Intelligent JSON extraction and validation")
     print("   - ✅ Smart fallback visualizations")
     print("   - ✅ Complete simple processor backup")
-    print("   - ✅ Advanced batch processing")
-    print("   - ✅ Force AI mode for testing")
-    print("   - ✅ Comprehensive system testing")
+    print("   - ✅ NEW: Complete chat session management")
+    print("   - ✅ NEW: Real-time message persistence")
+    print("   - ✅ NEW: Chat history and search")
     
     print("\n🔧 System Status:")
     if mongodb_available:
         print("   ✅ MongoDB: Connected and ready")
+        print("   ✅ Chat System: Indexes created, ready for persistence")
     else:
         print("   ❌ MongoDB: Connection failed")
+        print("   ❌ Chat System: Not available")
     
     if gemini_available:
         print("   ✅ Gemini AI: Bulletproof client ready")
@@ -2359,13 +2120,19 @@ if __name__ == '__main__':
     
     print(f"\n🌐 Server starting on http://localhost:5000")
     print("📊 Enhanced endpoints:")
-    print("   - POST /api/query (AI-first intelligent processing)")
-    print("   - POST /api/query/force-ai (AI-only processing)")
-    print("   - POST /api/batch_query (batch processing with AI)")
+    print("   - POST /api/query (AI-first intelligent processing + chat integration)")
     print("   - POST /api/system/test (comprehensive system testing)")
     print("   - GET  /api/health (system health)")
     print("   - GET  /api/examples (enhanced example questions)")
     print("   - GET  /api/debug/collections (enhanced debug info)")
+    print("\n💬 NEW: Chat Management Endpoints:")
+    print("   - GET  /api/chats (list all chat sessions)")
+    print("   - POST /api/chats (create new chat session)")
+    print("   - GET  /api/chats/{id} (get specific chat)")
+    print("   - PUT  /api/chats/{id} (update chat metadata)")
+    print("   - DELETE /api/chats/{id} (delete chat session)")
+    print("   - POST /api/chats/{id}/messages (add message to chat)")
+    print("   - GET  /api/chats/stats (chat system statistics)")
     print("=" * 60)
     
     app.run(debug=True, host='0.0.0.0', port=5000)

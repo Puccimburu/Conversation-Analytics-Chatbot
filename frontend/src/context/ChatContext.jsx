@@ -1,5 +1,8 @@
-// src/context/ChatContext.js
-import React, { createContext, useContext, useState, useEffect } from 'react';
+// File: frontend/src/context/ChatContext.jsx
+// Replace your existing ChatContext.jsx with this updated version
+
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import chatApiService from '../services/chatApi';
 
 const ChatContext = createContext();
 
@@ -12,307 +15,451 @@ export const useChatContext = () => {
 };
 
 export const ChatProvider = ({ children }) => {
+  // ============================================================================
+  // STATE MANAGEMENT
+  // ============================================================================
+  
+  // Core chat state
   const [conversations, setConversations] = useState([]);
+  const [currentChatId, setCurrentChatId] = useState(null);
+  const [currentChat, setCurrentChat] = useState(null);
+  
+  // UI state
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [backendStatus, setBackendStatus] = useState('checking');
+  
+  // Real-time state
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [lastSyncTime, setLastSyncTime] = useState(null);
 
-  // Check backend health on mount
-  useEffect(() => {
-    checkBackendHealth();
-    // Initialize with sample conversations if needed
-    if (conversations.length === 0) {
-      initializeSampleConversations();
+  // ============================================================================
+  // INITIALIZATION AND HEALTH CHECK
+  // ============================================================================
+
+  const checkBackendHealth = useCallback(async () => {
+    try {
+      setBackendStatus('checking');
+      const health = await chatApiService.getHealth();
+      
+      if (health.status === 'online') {
+        setBackendStatus('connected');
+        console.log('✅ Backend connected:', health);
+      } else {
+        setBackendStatus('degraded');
+      }
+    } catch (error) {
+      console.log('❌ Backend unavailable, using offline mode');
+      setBackendStatus('unavailable');
     }
   }, []);
 
-  const checkBackendHealth = async () => {
+  const loadInitialChats = useCallback(async () => {
+    if (backendStatus !== 'connected') return;
+    
     try {
-      const response = await fetch('http://localhost:5000/api/health');
-      if (response.ok) {
-        const health = await response.json();
-        setBackendStatus(health.status === 'healthy' ? 'connected' : 'unavailable');
-      } else {
-        setBackendStatus('unavailable');
+      setLoading(true);
+      setError(null);
+      
+      const response = await chatApiService.getAllChats({ limit: 50 });
+      
+      if (response.success && response.chats) {
+        // Convert backend format to frontend format
+        const formattedChats = response.chats.map(chat => 
+          chatApiService.formatChatForDisplay(chat)
+        );
+        
+        setConversations(formattedChats);
+        setLastSyncTime(new Date().toISOString());
+        console.log(`✅ Loaded ${formattedChats.length} chat sessions`);
       }
     } catch (error) {
-      console.log('Backend not available, using mock data');
+      console.error('Failed to load chats:', error);
+      setError('Failed to load chat history');
+      // Fallback to empty state rather than dummy data
+      setConversations([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [backendStatus]);
+
+  // Initialize on mount
+  useEffect(() => {
+    checkBackendHealth();
+  }, [checkBackendHealth]);
+
+  // Load chats when backend becomes available
+  useEffect(() => {
+    if (backendStatus === 'connected') {
+      loadInitialChats();
+    }
+  }, [backendStatus, loadInitialChats]);
+
+  // Online/offline detection
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      checkBackendHealth();
+    };
+    
+    const handleOffline = () => {
+      setIsOnline(false);
       setBackendStatus('unavailable');
-    }
-  };
-
-  const initializeSampleConversations = () => {
-    const sampleConversations = [
-      {
-        id: 'conv_1',
-        title: 'Smartphone vs Laptop Sales Comparison',
-        category: 'analysis',
-        priority: 'high',
-        lastMessage: '2 hours ago',
-        messageCount: 5,
-        unreadCount: 0,
-        lastActivity: Date.now() - 7200000, // 2 hours ago
-        status: 'active',
-        isLive: false,
-        participants: 1,
-        responses: []
-      },
-      {
-        id: 'conv_2',
-        title: 'Top 5 Selling Products Analysis',
-        category: 'analysis',
-        priority: 'medium',
-        lastMessage: '1 day ago',
-        messageCount: 3,
-        unreadCount: 1,
-        lastActivity: Date.now() - 86400000, // 1 day ago
-        status: 'active',
-        isLive: false,
-        participants: 1,
-        responses: []
-      },
-      {
-        id: 'conv_3',
-        title: 'Monthly Sales Trends Line Chart',
-        category: 'analysis',
-        priority: 'medium',
-        lastMessage: '3 days ago',
-        messageCount: 7,
-        unreadCount: 0,
-        lastActivity: Date.now() - 259200000, // 3 days ago
-        status: 'archived',
-        isLive: false,
-        participants: 1,
-        responses: []
-      },
-      {
-        id: 'conv_4',
-        title: 'Revenue by Category Breakdown',
-        category: 'analysis',
-        priority: 'low',
-        lastMessage: '1 week ago',
-        messageCount: 2,
-        unreadCount: 0,
-        lastActivity: Date.now() - 604800000, // 1 week ago
-        status: 'active',
-        isLive: false,
-        participants: 1,
-        responses: []
-      },
-      {
-        id: 'conv_5',
-        title: 'Customer Distribution Analysis',
-        category: 'analysis',
-        priority: 'medium',
-        lastMessage: '2 weeks ago',
-        messageCount: 4,
-        unreadCount: 0,
-        lastActivity: Date.now() - 1209600000, // 2 weeks ago
-        status: 'archived',
-        isLive: false,
-        participants: 1,
-        responses: []
-      }
-    ];
-
-    setConversations(sampleConversations);
-  };
-
-  const addNewChat = (chatConfig) => {
-    const newChat = {
-      id: `conv_${Date.now()}`,
-      title: chatConfig.title || 'New Conversation',
-      category: chatConfig.category || 'conversational',
-      priority: chatConfig.priority || 'medium',
-      lastMessage: 'just now',
-      messageCount: 1,
-      unreadCount: 0,
-      lastActivity: Date.now(),
-      status: 'active',
-      isLive: true,
-      participants: 1,
-      responses: [],
-      ...chatConfig
     };
 
-    setConversations(prev => [newChat, ...prev]);
-    return newChat.id;
-  };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
-  const updateChat = (chatId, updates) => {
-    setConversations(prev => 
-      prev.map(chat => 
-        chat.id === chatId 
-          ? { ...chat, ...updates, lastActivity: Date.now() }
-          : chat
-      )
-    );
-  };
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [checkBackendHealth]);
 
-  const deleteChat = (chatId) => {
-    setConversations(prev => prev.filter(chat => chat.id !== chatId));
-  };
+  // ============================================================================
+  // CHAT MANAGEMENT FUNCTIONS
+  // ============================================================================
 
-  const markChatAsRead = (chatId) => {
-    updateChat(chatId, { unreadCount: 0 });
-  };
+  const addNewChat = useCallback(async (chatConfig = {}) => {
+    try {
+      setLoading(true);
+      setError(null);
 
-  const starChat = (chatId) => {
-    updateChat(chatId, { starred: true });
-  };
+      // Prepare chat data
+      const chatData = {
+        title: chatConfig.title || `Chat ${new Date().toLocaleString()}`,
+        category: chatConfig.category || 'conversational',
+        ...chatConfig
+      };
 
-  const unstarChat = (chatId) => {
-    updateChat(chatId, { starred: false });
-  };
-
-  const archiveChat = (chatId) => {
-    updateChat(chatId, { status: 'archived' });
-  };
-
-  const unarchiveChat = (chatId) => {
-    updateChat(chatId, { status: 'active' });
-  };
-
-  // Analytics functions that integrate with your backend
-  const submitQuery = async (query, options = {}) => {
-    if (backendStatus === 'connected') {
-      try {
-        const response = await fetch('http://localhost:5000/api/query', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: query,
-            chart_preference: options.chartType || 'auto',
-            ...options
-          })
-        });
-
-        if (response.ok) {
-          return await response.json();
-        } else {
-          throw new Error(`Backend error: ${response.status}`);
+      if (backendStatus === 'connected') {
+        // Create chat via API
+        const response = await chatApiService.createChat(chatData);
+        
+        if (response.success && response.chat) {
+          const formattedChat = chatApiService.formatChatForDisplay(response.chat);
+          
+          // Add to state
+          setConversations(prev => [formattedChat, ...prev]);
+          setCurrentChatId(response.chat_id);
+          setCurrentChat(formattedChat);
+          
+          console.log(`✅ Created new chat: ${response.chat_id}`);
+          return response.chat_id;
         }
-      } catch (error) {
-        console.error('Query submission error:', error);
-        return null;
+      } else {
+        // Offline mode - create temporary chat
+        const tempChat = {
+          id: `temp_${Date.now()}`,
+          title: chatData.title,
+          category: chatData.category,
+          lastMessage: 'just now',
+          timestamp: Date.now(),
+          priority: 'medium',
+          isStarred: false,
+          isShared: false,
+          isLive: true,
+          status: 'active',
+          messageCount: 0,
+          participants: 1,
+          lastActivity: Date.now(),
+          unreadCount: 0,
+          isTyping: false,
+          sentiment: 'neutral',
+          messages: [],
+          isOffline: true // Mark as offline
+        };
+        
+        setConversations(prev => [tempChat, ...prev]);
+        setCurrentChatId(tempChat.id);
+        setCurrentChat(tempChat);
+        
+        return tempChat.id;
       }
+    } catch (error) {
+      console.error('Failed to create chat:', error);
+      setError('Failed to create new chat');
+      return null;
+    } finally {
+      setLoading(false);
     }
-    return null; // Fall back to mock data in components
-  };
+  }, [backendStatus]);
 
-  const submitFeedback = async (feedbackData) => {
-    if (backendStatus === 'connected') {
-      try {
-        const response = await fetch('http://localhost:5000/api/feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(feedbackData)
-        });
-
-        if (response.ok) {
-          return await response.json();
+  const loadChat = useCallback(async (chatId) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      if (backendStatus === 'connected') {
+        const response = await chatApiService.getChat(chatId);
+        
+        if (response.success && response.chat) {
+          const formattedChat = chatApiService.formatChatForDisplay(response.chat);
+          
+          // Convert messages to frontend format
+          if (response.chat.messages) {
+            formattedChat.messages = response.chat.messages.map(msg =>
+              chatApiService.formatMessageForDisplay(msg)
+            );
+          }
+          
+          setCurrentChatId(chatId);
+          setCurrentChat(formattedChat);
+          
+          console.log(`✅ Loaded chat: ${chatId} with ${formattedChat.messages.length} messages`);
+          return formattedChat;
         }
-      } catch (error) {
-        console.error('Feedback submission error:', error);
+      } else {
+        // Offline mode - find in local state
+        const localChat = conversations.find(chat => chat.id === chatId);
+        if (localChat) {
+          setCurrentChatId(chatId);
+          setCurrentChat(localChat);
+          return localChat;
+        }
       }
+      
+      throw new Error('Chat not found');
+    } catch (error) {
+      console.error('Failed to load chat:', error);
+      setError(`Failed to load chat: ${chatId}`);
+      return null;
+    } finally {
+      setLoading(false);
     }
-    return null;
-  };
+  }, [backendStatus, conversations]);
 
-  // Search and filter functions
-  const searchConversations = (searchTerm) => {
-    if (!searchTerm.trim()) return conversations;
-    
-    return conversations.filter(conv => 
-      conv.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      conv.category.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  };
-
-  const filterConversations = (filter) => {
-    switch (filter) {
-      case 'active':
-        return conversations.filter(conv => conv.status === 'active');
-      case 'archived':
-        return conversations.filter(conv => conv.status === 'archived');
-      case 'starred':
-        return conversations.filter(conv => conv.starred);
-      case 'unread':
-        return conversations.filter(conv => conv.unreadCount > 0);
-      default:
-        return conversations;
-    }
-  };
-
-  const sortConversations = (sortBy) => {
-    const sorted = [...conversations];
-    
-    switch (sortBy) {
-      case 'recent':
-        return sorted.sort((a, b) => b.lastActivity - a.lastActivity);
-      case 'oldest':
-        return sorted.sort((a, b) => a.lastActivity - b.lastActivity);
-      case 'title':
-        return sorted.sort((a, b) => a.title.localeCompare(b.title));
-      case 'category':
-        return sorted.sort((a, b) => a.category.localeCompare(b.category));
-      case 'priority':
-        const priorityOrder = { urgent: 4, high: 3, medium: 2, low: 1 };
-        return sorted.sort((a, b) => 
-          (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0)
+  const updateChat = useCallback(async (chatId, updates) => {
+    try {
+      if (backendStatus === 'connected') {
+        const response = await chatApiService.updateChat(chatId, updates);
+        
+        if (response.success) {
+          // Update local state
+          setConversations(prev => 
+            prev.map(chat => 
+              chat.id === chatId ? { ...chat, ...updates } : chat
+            )
+          );
+          
+          if (currentChatId === chatId && currentChat) {
+            setCurrentChat(prev => ({ ...prev, ...updates }));
+          }
+          
+          console.log(`✅ Updated chat: ${chatId}`);
+          return true;
+        }
+      } else {
+        // Offline mode - update local state only
+        setConversations(prev => 
+          prev.map(chat => 
+            chat.id === chatId ? { ...chat, ...updates } : chat
+          )
         );
-      default:
-        return sorted;
+        
+        if (currentChatId === chatId) {
+          setCurrentChat(prev => ({ ...prev, ...updates }));
+        }
+        
+        return true;
+      }
+    } catch (error) {
+      console.error('Failed to update chat:', error);
+      setError('Failed to update chat');
+      return false;
     }
-  };
+  }, [backendStatus, currentChatId, currentChat]);
 
-  const getConversationStats = () => {
-    const stats = {
-      total: conversations.length,
-      active: conversations.filter(conv => conv.status === 'active').length,
-      archived: conversations.filter(conv => conv.status === 'archived').length,
-      starred: conversations.filter(conv => conv.starred).length,
-      unread: conversations.filter(conv => conv.unreadCount > 0).length,
-      categories: {}
-    };
+  const deleteChat = useCallback(async (chatId) => {
+    try {
+      if (backendStatus === 'connected') {
+        const response = await chatApiService.deleteChat(chatId);
+        
+        if (response.success) {
+          // Remove from local state
+          setConversations(prev => prev.filter(chat => chat.id !== chatId));
+          
+          if (currentChatId === chatId) {
+            setCurrentChatId(null);
+            setCurrentChat(null);
+          }
+          
+          console.log(`✅ Deleted chat: ${chatId}`);
+          return true;
+        }
+      } else {
+        // Offline mode - remove from local state
+        setConversations(prev => prev.filter(chat => chat.id !== chatId));
+        
+        if (currentChatId === chatId) {
+          setCurrentChatId(null);
+          setCurrentChat(null);
+        }
+        
+        return true;
+      }
+    } catch (error) {
+      console.error('Failed to delete chat:', error);
+      setError('Failed to delete chat');
+      return false;
+    }
+  }, [backendStatus, currentChatId]);
 
-    // Category breakdown
-    conversations.forEach(conv => {
-      stats.categories[conv.category] = (stats.categories[conv.category] || 0) + 1;
-    });
+  // ============================================================================
+  // QUERY PROCESSING WITH CHAT INTEGRATION
+  // ============================================================================
 
-    return stats;
-  };
+  const sendQueryWithChat = useCallback(async (question, chatId = null, forceAI = false) => {
+    try {
+      setLoading(true);
+      setError(null);
 
-  const value = {
+      const targetChatId = chatId || currentChatId;
+      
+      if (backendStatus === 'connected') {
+        // Send to backend with chat integration
+        const response = forceAI 
+          ? await chatApiService.sendForceAiQuery(question, targetChatId)
+          : await chatApiService.sendQuery(question, targetChatId);
+        
+        if (response.success) {
+          // Update chat in conversations list
+          if (targetChatId) {
+            setConversations(prev => 
+              prev.map(chat => 
+                chat.id === targetChatId 
+                  ? { 
+                      ...chat, 
+                      lastMessage: 'just now',
+                      lastActivity: Date.now(),
+                      messageCount: (chat.messageCount || 0) + 2, // user + assistant
+                      isLive: true
+                    }
+                  : chat
+              )
+            );
+            
+            // Reload current chat to get updated messages
+            if (currentChatId === targetChatId) {
+              await loadChat(targetChatId);
+            }
+          }
+          
+          console.log(`✅ Query processed successfully with chat integration`);
+          return response;
+        }
+      } else {
+        // Offline mode - return mock response
+        return {
+          success: false,
+          error: 'Backend unavailable - working in offline mode',
+          offline: true
+        };
+      }
+    } catch (error) {
+      console.error('Failed to send query:', error);
+      setError('Failed to send query');
+      return { success: false, error: error.message };
+    } finally {
+      setLoading(false);
+    }
+  }, [backendStatus, currentChatId, loadChat]);
+
+  // ============================================================================
+  // UTILITY FUNCTIONS
+  // ============================================================================
+
+  const refreshChats = useCallback(async () => {
+    if (backendStatus === 'connected') {
+      await loadInitialChats();
+    }
+  }, [loadInitialChats, backendStatus]);
+
+  const searchChats = useCallback(async (query) => {
+    if (!query.trim()) return conversations;
+    
+    try {
+      if (backendStatus === 'connected') {
+        const response = await chatApiService.searchChats(query);
+        if (response.success) {
+          return response.chats.map(chat => chatApiService.formatChatForDisplay(chat));
+        }
+      }
+      
+      // Fallback to local search
+      return conversations.filter(chat => 
+        chat.title.toLowerCase().includes(query.toLowerCase())
+      );
+    } catch (error) {
+      console.error('Search failed:', error);
+      return conversations.filter(chat => 
+        chat.title.toLowerCase().includes(query.toLowerCase())
+      );
+    }
+  }, [conversations, backendStatus]);
+
+  const getChatStats = useCallback(async () => {
+    try {
+      if (backendStatus === 'connected') {
+        return await chatApiService.getChatStats();
+      }
+      
+      // Return local stats
+      return {
+        success: true,
+        statistics: {
+          total_chats: conversations.length,
+          active_chats: conversations.filter(c => c.status === 'active').length,
+          total_messages: conversations.reduce((sum, c) => sum + (c.messageCount || 0), 0),
+          system_health: { database_available: false }
+        }
+      };
+    } catch (error) {
+      console.error('Failed to get stats:', error);
+      return { success: false, error: error.message };
+    }
+  }, [conversations, backendStatus]);
+
+  // ============================================================================
+  // CONTEXT VALUE
+  // ============================================================================
+
+  const contextValue = {
     // State
     conversations,
-    setConversations,
+    currentChatId,
+    currentChat,
+    loading,
+    error,
     backendStatus,
+    isOnline,
+    lastSyncTime,
     
-    // Chat management
+    // Chat Management
     addNewChat,
+    loadChat,
     updateChat,
     deleteChat,
-    markChatAsRead,
-    starChat,
-    unstarChat,
-    archiveChat,
-    unarchiveChat,
+    setConversations,
     
-    // Backend integration
-    submitQuery,
-    submitFeedback,
+    // Query Processing
+    sendQueryWithChat,
+    
+    // Utilities
+    refreshChats,
+    searchChats,
+    getChatStats,
     checkBackendHealth,
     
-    // Search and filter
-    searchConversations,
-    filterConversations,
-    sortConversations,
-    getConversationStats
+    // Direct API access (for advanced use)
+    apiService: chatApiService
   };
 
   return (
-    <ChatContext.Provider value={value}>
+    <ChatContext.Provider value={contextValue}>
       {children}
     </ChatContext.Provider>
   );
 };
+
+export default ChatContext;
