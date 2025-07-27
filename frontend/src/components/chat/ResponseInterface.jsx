@@ -24,8 +24,9 @@ import {
   Send
 } from 'lucide-react';
 
-const ResponseInterface = ({ query, onClose }) => {
+const ResponseInterface = ({ query, onClose, chatId, existingMessages }) => {
   const [responses, setResponses] = useState([]);
+  const [chatId_internal] = useState(chatId); 
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStep, setProcessingStep] = useState('');
   const [followUpQuery, setFollowUpQuery] = useState('');
@@ -58,6 +59,25 @@ const ResponseInterface = ({ query, onClose }) => {
     }
   }, [responses, isProcessing]);
 
+  
+  // In the useEffect for existing messages:
+  // 🎯 PASTE THIS ENTIRE BLOCK:
+  useEffect(() => {
+    if (existingMessages && existingMessages.length > 0) {
+      console.log('Loading existing messages:', existingMessages);
+      const formattedResponses = existingMessages.map((msg, index) => ({
+        id: msg.message_id || `existing_${index}`,
+        query: msg.type === 'user' ? msg.content : 'Previous query',     
+        timestamp: new Date(msg.timestamp).getTime(),
+        answer: msg.type === 'assistant' ? msg.content : 'Previous response', 
+        chartData: msg.chart_data || null,
+        validation: msg.validation || null,
+        activeTab: 'answer'
+      }));
+      setResponses(formattedResponses);
+    } 
+  }, [existingMessages]);
+  
   const processQuery = async (queryText, isFollowUp = false, responseIdToReplace = null) => {
     // FIX: Add early return if already processing
     if (isProcessing && !responseIdToReplace) {
@@ -89,7 +109,10 @@ const ResponseInterface = ({ query, onClose }) => {
       const backendResponse = await fetch('http://localhost:5000/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: queryText })
+        body: JSON.stringify({ 
+          question: queryText,
+          chat_id: chatId_internal 
+        })  
       });
 
       let responseData;

@@ -1,5 +1,6 @@
-// src/context/ChatContext.js
+// src/context/ChatContext.jsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import chatAPI from '../services/chatApi'; // 🎯 NEW: Import our chat API
 
 const ChatContext = createContext();
 
@@ -14,99 +15,81 @@ export const useChatContext = () => {
 export const ChatProvider = ({ children }) => {
   const [conversations, setConversations] = useState([]);
   const [backendStatus, setBackendStatus] = useState('checking');
+  const [isLoadingChats, setIsLoadingChats] = useState(false); // 🎯 NEW: Track loading state
 
-  // Check backend health on mount
+  // 🎯 ENHANCED: Check backend health and load real chats
   useEffect(() => {
-    checkBackendHealth();
-    // Initialize with sample conversations if needed
-    if (conversations.length === 0) {
-      initializeSampleConversations();
-    }
+    initializeChats();
   }, []);
+
+  const initializeChats = async () => {
+    setIsLoadingChats(true);
+    
+    // Check backend health first
+    await checkBackendHealth();
+    
+    // Try to load real chats, fall back to sample data if needed
+    await loadInitialChats();
+    
+    setIsLoadingChats(false);
+  };
 
   const checkBackendHealth = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/health');
-      if (response.ok) {
-        const health = await response.json();
-        setBackendStatus(health.status === 'healthy' ? 'connected' : 'unavailable');
+      const healthResponse = await chatAPI.checkHealth();
+      if (healthResponse.success) {
+        setBackendStatus('connected');
       } else {
         setBackendStatus('unavailable');
       }
     } catch (error) {
-      console.log('Backend not available, using mock data');
+      console.log('Backend not available, using local data');
       setBackendStatus('unavailable');
     }
   };
 
+  // 🎯 NEW: Load initial chats from backend
+  const loadInitialChats = async () => {
+    try {
+      if (backendStatus === 'connected') {
+        const response = await chatAPI.getAllChats({ limit: 50 });
+        
+        if (response.success && response.chats.length > 0) {
+          // Transform backend chats to frontend format
+          const transformedChats = response.chats.map(chat => 
+            chatAPI.transformChatForFrontend(chat)
+          );
+          setConversations(transformedChats);
+          return;
+        }
+      }
+      
+      // Fallback: Initialize with sample data if no real chats
+      if (conversations.length === 0) {
+        initializeSampleConversations();
+      }
+    } catch (error) {
+      console.error('Failed to load initial chats:', error);
+      // Fallback to sample conversations
+      if (conversations.length === 0) {
+        initializeSampleConversations();
+      }
+    }
+  };
+
+  // 🎯 STREAMLINED: Simplified sample conversations (only used as fallback)
   const initializeSampleConversations = () => {
     const sampleConversations = [
       {
-        id: 'conv_1',
-        title: 'Smartphone vs Laptop Sales Comparison',
-        category: 'analysis',
-        priority: 'high',
-        lastMessage: '2 hours ago',
-        messageCount: 5,
-        unreadCount: 0,
-        lastActivity: Date.now() - 7200000, // 2 hours ago
-        status: 'active',
-        isLive: false,
-        participants: 1,
-        responses: []
-      },
-      {
-        id: 'conv_2',
-        title: 'Top 5 Selling Products Analysis',
+        id: 'sample_1',
+        title: 'Welcome to Analytics Chat',
         category: 'analysis',
         priority: 'medium',
-        lastMessage: '1 day ago',
-        messageCount: 3,
-        unreadCount: 1,
-        lastActivity: Date.now() - 86400000, // 1 day ago
+        lastMessage: 'just now',
+        messageCount: 1,
+        unreadCount: 0,
+        lastActivity: Date.now(),
         status: 'active',
-        isLive: false,
-        participants: 1,
-        responses: []
-      },
-      {
-        id: 'conv_3',
-        title: 'Monthly Sales Trends Line Chart',
-        category: 'analysis',
-        priority: 'medium',
-        lastMessage: '3 days ago',
-        messageCount: 7,
-        unreadCount: 0,
-        lastActivity: Date.now() - 259200000, // 3 days ago
-        status: 'archived',
-        isLive: false,
-        participants: 1,
-        responses: []
-      },
-      {
-        id: 'conv_4',
-        title: 'Revenue by Category Breakdown',
-        category: 'analysis',
-        priority: 'low',
-        lastMessage: '1 week ago',
-        messageCount: 2,
-        unreadCount: 0,
-        lastActivity: Date.now() - 604800000, // 1 week ago
-        status: 'active',
-        isLive: false,
-        participants: 1,
-        responses: []
-      },
-      {
-        id: 'conv_5',
-        title: 'Customer Distribution Analysis',
-        category: 'analysis',
-        priority: 'medium',
-        lastMessage: '2 weeks ago',
-        messageCount: 4,
-        unreadCount: 0,
-        lastActivity: Date.now() - 1209600000, // 2 weeks ago
-        status: 'archived',
         isLive: false,
         participants: 1,
         responses: []
@@ -116,20 +99,21 @@ export const ChatProvider = ({ children }) => {
     setConversations(sampleConversations);
   };
 
+  // 🎯 ENHANCED: Add new chat with backend integration
   const addNewChat = (chatConfig) => {
     const newChat = {
-      id: `conv_${Date.now()}`,
+      id: chatConfig.id || `conv_${Date.now()}`, // 🎯 Use provided ID (from backend) or generate
       title: chatConfig.title || 'New Conversation',
       category: chatConfig.category || 'conversational',
       priority: chatConfig.priority || 'medium',
-      lastMessage: 'just now',
-      messageCount: 1,
-      unreadCount: 0,
-      lastActivity: Date.now(),
-      status: 'active',
-      isLive: true,
-      participants: 1,
-      responses: [],
+      lastMessage: chatConfig.lastMessage || 'just now',
+      messageCount: chatConfig.messageCount || 1,
+      unreadCount: chatConfig.unreadCount || 0,
+      lastActivity: chatConfig.lastActivity || Date.now(),
+      status: chatConfig.status || 'active',
+      isLive: chatConfig.isLive !== undefined ? chatConfig.isLive : true,
+      participants: chatConfig.participants || 1,
+      responses: chatConfig.responses || [],
       ...chatConfig
     };
 
@@ -137,7 +121,9 @@ export const ChatProvider = ({ children }) => {
     return newChat.id;
   };
 
-  const updateChat = (chatId, updates) => {
+  // 🎯 ENHANCED: Update chat with backend sync
+  const updateChat = async (chatId, updates) => {
+    // Update local state immediately for UI responsiveness
     setConversations(prev => 
       prev.map(chat => 
         chat.id === chatId 
@@ -145,12 +131,62 @@ export const ChatProvider = ({ children }) => {
           : chat
       )
     );
+
+    // 🎯 NEW: Sync with backend if connected
+    if (backendStatus === 'connected') {
+      try {
+        const chat = conversations.find(c => c.id === chatId);
+        if (chat && chat._backendData) {
+          await chatAPI.updateChat(chat._backendData.chat_id, updates);
+        }
+      } catch (error) {
+        console.error('Failed to sync chat update with backend:', error);
+        // UI already updated, so this is not critical
+      }
+    }
   };
 
-  const deleteChat = (chatId) => {
+  // 🎯 ENHANCED: Delete chat with backend sync
+  const deleteChat = async (chatId) => {
+    // Find the chat first
+    const chat = conversations.find(c => c.id === chatId);
+    
+    // Remove from local state immediately
     setConversations(prev => prev.filter(chat => chat.id !== chatId));
+
+    // 🎯 NEW: Sync with backend if connected
+    if (backendStatus === 'connected' && chat && chat._backendData) {
+      try {
+        await chatAPI.deleteChat(chat._backendData.chat_id);
+      } catch (error) {
+        console.error('Failed to delete chat from backend:', error);
+        // Chat already removed from UI, so this is not critical
+      }
+    }
   };
 
+  // 🎯 NEW: Refresh chats from backend
+  const refreshChats = async () => {
+    if (backendStatus === 'connected') {
+      setIsLoadingChats(true);
+      try {
+        const response = await chatAPI.getAllChats({ limit: 50 });
+        
+        if (response.success) {
+          const transformedChats = response.chats.map(chat => 
+            chatAPI.transformChatForFrontend(chat)
+          );
+          setConversations(transformedChats);
+        }
+      } catch (error) {
+        console.error('Failed to refresh chats:', error);
+      } finally {
+        setIsLoadingChats(false);
+      }
+    }
+  };
+
+  // 🎯 EXISTING: Keep all your existing functions (unchanged)
   const markChatAsRead = (chatId) => {
     updateChat(chatId, { unreadCount: 0 });
   };
@@ -171,7 +207,7 @@ export const ChatProvider = ({ children }) => {
     updateChat(chatId, { status: 'active' });
   };
 
-  // Analytics functions that integrate with your backend
+  // 🎯 ENHANCED: Analytics functions with chat_id support
   const submitQuery = async (query, options = {}) => {
     if (backendStatus === 'connected') {
       try {
@@ -180,6 +216,7 @@ export const ChatProvider = ({ children }) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             query: query,
+            chat_id: options.chat_id || null, // 🎯 NEW: Include chat_id
             chart_preference: options.chartType || 'auto',
             ...options
           })
@@ -217,7 +254,7 @@ export const ChatProvider = ({ children }) => {
     return null;
   };
 
-  // Search and filter functions
+  // 🎯 EXISTING: Keep all your search and filter functions (unchanged)
   const searchConversations = (searchTerm) => {
     if (!searchTerm.trim()) return conversations;
     
@@ -282,13 +319,15 @@ export const ChatProvider = ({ children }) => {
     return stats;
   };
 
+  // 🎯 ENHANCED: Provider value with new functions
   const value = {
     // State
     conversations,
     setConversations,
     backendStatus,
+    isLoadingChats, // 🎯 NEW: Loading state
     
-    // Chat management
+    // Chat management (enhanced)
     addNewChat,
     updateChat,
     deleteChat,
@@ -297,13 +336,14 @@ export const ChatProvider = ({ children }) => {
     unstarChat,
     archiveChat,
     unarchiveChat,
+    refreshChats, // 🎯 NEW: Refresh function
     
-    // Backend integration
+    // Backend integration (enhanced)
     submitQuery,
     submitFeedback,
     checkBackendHealth,
     
-    // Search and filter
+    // Search and filter (unchanged)
     searchConversations,
     filterConversations,
     sortConversations,
