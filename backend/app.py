@@ -3,7 +3,7 @@ from flask_cors import CORS
 import asyncio
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pymongo
 import json
 import google.generativeai as genai
@@ -90,7 +90,7 @@ def create_new_chat_session(title=None, category="conversational"):
     
     try:
         chat_id = generate_chat_id()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         # Auto-generate title if not provided
         if not title:
@@ -136,7 +136,7 @@ def save_message_to_chat(chat_id, message_data):
             message_data['message_id'] = generate_message_id()
         
         if 'timestamp' not in message_data:
-            message_data['timestamp'] = datetime.utcnow()
+            message_data['timestamp'] = datetime.now(timezone.utc)
         
         # Update the chat session
         result = db.chat_sessions.update_one(
@@ -144,8 +144,8 @@ def save_message_to_chat(chat_id, message_data):
             {
                 '$push': {'messages': message_data},
                 '$set': {
-                    'updated_at': datetime.utcnow(),
-                    'metadata.last_activity': datetime.utcnow()
+                    'updated_at': datetime.now(timezone.utc),
+                    'metadata.last_activity': datetime.now(timezone.utc)
                 },
                 '$inc': {'metadata.total_messages': 1}
             }
@@ -217,7 +217,7 @@ def update_chat_session(chat_id, updates):
     
     try:
         # Add updated timestamp
-        updates['updated_at'] = datetime.utcnow()
+        updates['updated_at'] = datetime.now(timezone.utc)
         
         result = db.chat_sessions.update_one(
             {'chat_id': chat_id},
@@ -248,7 +248,7 @@ def delete_chat_session(chat_id, soft_delete=True):
                 {
                     '$set': {
                         'status': 'deleted',
-                        'updated_at': datetime.utcnow()
+                        'updated_at': datetime.now(timezone.utc)
                     }
                 }
             )
@@ -1458,7 +1458,7 @@ def create_chat_session_endpoint():
                 message_data = {
                     'type': 'user',
                     'content': first_message,
-                    'timestamp': datetime.utcnow()
+                    'timestamp': datetime.now(timezone.utc)
                 }
                 save_message_to_chat(chat_id, message_data)
             
@@ -1535,7 +1535,7 @@ def add_message_to_chat_endpoint(chat_id):
         message_data = {
             'type': message_type,
             'content': content,
-            'timestamp': datetime.utcnow()
+            'timestamp': datetime.now(timezone.utc)
         }
         
         # Add optional fields if provided
@@ -1701,7 +1701,7 @@ def process_query():
             user_message = {
                 'type': 'user',
                 'content': user_question,
-                'timestamp': datetime.utcnow()
+                'timestamp': datetime.now(timezone.utc)
             }
             save_message_to_chat(chat_id, user_message)
         
@@ -1746,7 +1746,7 @@ def process_query():
                 'recommendations': result.get('recommendations'),
                 'memory_context': result.get('memory_context'),
                 'processing_mode': result.get('processing_mode'),
-                'timestamp': datetime.utcnow()
+                'timestamp': datetime.now(timezone.utc)
             }
             save_message_to_chat(chat_id, ai_message)
         
@@ -1800,7 +1800,7 @@ def test_system_components():
                     test_message = {
                         'type': 'user',
                         'content': 'Test message for system validation',
-                        'timestamp': datetime.utcnow()
+                        'timestamp': datetime.now(timezone.utc)
                     }
                     message_saved = save_message_to_chat(test_chat_id, test_message)
                     
@@ -2050,7 +2050,7 @@ def get_chat_statistics():
         archived_chats = db.chat_sessions.count_documents({"status": "deleted"})
         
         # Get recent activity
-        one_day_ago = datetime.utcnow() - timedelta(days=1)
+        one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
         recent_chats = db.chat_sessions.count_documents({
             "updated_at": {"$gte": one_day_ago}
         })
@@ -2093,7 +2093,7 @@ def get_chat_statistics():
                 "system_health": {
                     "database_available": True,
                     "chat_indexes_ready": True,
-                    "last_updated": datetime.utcnow().isoformat()
+                    "last_updated": datetime.now(timezone.utc).isoformat()
                 }
             }
         })
