@@ -37,20 +37,72 @@ const ResponseInterface = ({ query, onClose, chatId, existingMessages }) => {
   // FIX: Add ref to track initial query processing
   const hasProcessedInitialQuery = useRef(false);
 
-  // FIX: Modified useEffect to prevent double execution
+  // 🔧 SINGLE INITIALIZATION: Handle both existing messages AND new query
   useEffect(() => {
-    if (query && responses.length === 0 && !hasProcessedInitialQuery.current && !isProcessing) {
-      hasProcessedInitialQuery.current = true;
+    // Prevent double initialization
+    if (hasProcessedInitialQuery.current) {
+      return;
+    }
+    
+    hasProcessedInitialQuery.current = true;
+    
+    // CASE 1: Loading existing chat messages (page reload)
+    if (existingMessages && existingMessages.length > 0) {
+      console.log('📝 Loading existing messages:', existingMessages.length);
+      // Group messages into conversation pairs (user + assistant)
+      const conversationPairs = [];
+      let currentPair = { user: null, assistant: null };
+
+      existingMessages.forEach(msg => {
+        if (!msg || !msg.content) return; // Skip invalid messages
+        
+        if (msg.type === 'user') {
+          // Start new conversation pair
+          if (currentPair.user || currentPair.assistant) {
+            conversationPairs.push(currentPair);
+          }
+          currentPair = { user: msg, assistant: null };
+        } else if (msg.type === 'assistant') {
+          // Complete current pair
+          currentPair.assistant = msg;
+        }
+      });
+
+      // Add the last pair if it exists
+      if (currentPair.user || currentPair.assistant) {
+        conversationPairs.push(currentPair);
+      }
+
+      // Convert pairs to response format
+      const formattedResponses = conversationPairs
+        .filter(pair => pair.user) // Only include pairs with user queries
+        .map((pair, index) => ({
+          id: pair.assistant?.message_id || pair.user?.message_id || `existing_${index}`,
+          query: pair.user?.content || 'Previous query',
+          timestamp: new Date(pair.user?.timestamp || Date.now()).getTime(),
+          answer: pair.assistant?.content || 'Processing...', 
+          chartData: pair.assistant?.chart_data || null,
+          validation: pair.assistant?.validation || null,
+          activeTab: 'answer'
+        }));
+      setResponses(formattedResponses);
+      console.log('✅ Loaded', formattedResponses.length, 'existing messages');
+      return; // IMPORTANT: Return here to prevent processing new query
+    }
+    
+    // CASE 2: New chat with initial query
+    if (query && query.trim()) {
+      console.log('🔄 Processing new query:', query);
       processQuery(query);
     }
-  }, [query]);
+  }, [query, existingMessages]);
 
-  // FIX: Reset the ref when query changes
+  // Reset flag when chat changes
   useEffect(() => {
-    if (query) {
+    return () => {
       hasProcessedInitialQuery.current = false;
-    }
-  }, [query]);
+    };
+  }, [chatId]);
 
   // Auto-scroll to bottom when new content appears
   useEffect(() => {
@@ -60,23 +112,7 @@ const ResponseInterface = ({ query, onClose, chatId, existingMessages }) => {
   }, [responses, isProcessing]);
 
   
-  // In the useEffect for existing messages:
-  // 🎯 PASTE THIS ENTIRE BLOCK:
-  useEffect(() => {
-    if (existingMessages && existingMessages.length > 0) {
-      console.log('Loading existing messages:', existingMessages);
-      const formattedResponses = existingMessages.map((msg, index) => ({
-        id: msg.message_id || `existing_${index}`,
-        query: msg.type === 'user' ? msg.content : 'Previous query',     
-        timestamp: new Date(msg.timestamp).getTime(),
-        answer: msg.type === 'assistant' ? msg.content : 'Previous response', 
-        chartData: msg.chart_data || null,
-        validation: msg.validation || null,
-        activeTab: 'answer'
-      }));
-      setResponses(formattedResponses);
-    } 
-  }, [existingMessages]);
+  
   
   const processQuery = async (queryText, isFollowUp = false, responseIdToReplace = null) => {
     // FIX: Add early return if already processing

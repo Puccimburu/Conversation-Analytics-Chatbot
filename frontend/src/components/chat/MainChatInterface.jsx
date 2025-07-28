@@ -224,7 +224,7 @@ const MainChatInterface = () => {
     }
   ];
 
-  // 🎯 EXACTLY THE SAME: Main search interface (no design changes)
+  // Main search interface with original UI design
   return (
     <div className="flex-1 min-h-screen bg-white flex items-center justify-center p-8">
       <div className="w-full max-w-4xl">
@@ -238,53 +238,69 @@ const MainChatInterface = () => {
             }`}>
               <div className={`w-2 h-2 rounded-full ${
                 backendHealth.status === 'healthy' ? 'bg-green-500' : 'bg-yellow-500'
-              }`} />
+              }`}></div>
               <span>
                 {backendHealth.status === 'healthy' 
-                  ? 'Connected to backend' 
-                  : 'Using mock data'
+                  ? 'Connected to Analytics Backend' 
+                  : 'Demo Mode - Backend Unavailable'
                 }
               </span>
             </div>
           </div>
         )}
 
-        {/* Main Title */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            What can I help you analyze today?
+        {/* Main Logo/Title */}
+        <div className="text-center mb-12">
+          <h1 className="text-4xl font-normal text-gray-900 mb-3">
+            Convo Analytics
           </h1>
-          <p className="text-lg text-gray-600">
-            Ask me anything about your data and I'll create beautiful visualizations
+          <p className="text-gray-500 text-lg">
+            Ask questions about your data and get instant visualizations
           </p>
         </div>
 
-        {/* Search Input */}
-        <div className="relative mb-8">
-          <div className={`
-            relative border-2 rounded-2xl transition-all duration-300 bg-white shadow-sm
-            ${isActive || query ? 'border-blue-500 shadow-lg' : 'border-gray-200 hover:border-gray-300'}
-          `}>
-            <textarea
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setIsActive(e.target.value.length > 0);
-              }}
-              onKeyPress={handleKeyPress}
-              placeholder="e.g., Show me top 5 selling products, Revenue by category pie chart, Monthly sales trends..."
-              className="w-full p-6 pr-16 text-lg resize-none rounded-2xl border-0 focus:outline-none focus:ring-0 min-h-[120px] max-h-[200px] overflow-y-auto"
-              style={{ scrollbarWidth: 'thin' }}
-              disabled={isCreatingChat}
-            />
-            
-            <div className="absolute bottom-4 right-4 flex items-center space-x-2">
-              {/* 🎯 UPDATED: Loading state for chat creation */}
+        {/* Loading State */}
+        {isCreatingChat && (
+          <div className="text-center mb-8">
+            <div className="flex items-center justify-center space-x-3 text-gray-600">
+              <div className="w-6 h-6 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
+              <span>Creating your conversation...</span>
+            </div>
+          </div>
+        )}
+
+        {/* Main Search Input */}
+        <div className="mb-8">
+          <div className="relative">
+            {/* Input Field */}
+            <div className={`
+              relative rounded-xl border transition-all duration-200 bg-white
+              ${isActive || query ? 'border-gray-300 shadow-lg' : 'border-gray-200 shadow-sm'}
+            `}>
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setIsActive(true);
+                }}
+                onFocus={() => setIsActive(true)}
+                onBlur={() => setTimeout(() => setIsActive(false), 100)}
+                onKeyPress={handleKeyPress}
+                placeholder="Ask about your sales data, request charts, or analyze trends..."
+                disabled={isCreatingChat}
+                className={`
+                  w-full px-4 py-4 text-gray-900 placeholder-gray-500 bg-transparent border-0 rounded-xl focus:outline-none focus:ring-0 pr-16
+                  ${isCreatingChat ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+              />
+              
+              {/* Send Button */}
               <button
                 onClick={handleSubmit}
                 disabled={!query.trim() || isCreatingChat}
                 className={`
-                  p-3 rounded-xl transition-all duration-200 flex items-center justify-center
+                  absolute right-3 top-1/2 transform -translate-y-1/2 p-2 rounded-lg transition-all duration-200
                   ${query.trim() && !isCreatingChat
                     ? 'bg-teal-600 text-white hover:bg-teal-700 shadow-sm' 
                     : 'bg-gray-100 text-gray-400 cursor-not-allowed'
@@ -342,23 +358,20 @@ const MainChatInterface = () => {
                 >
                   <Mic className="w-4 h-4" />
                 </button>
+                {/* Audio Visualizer */}
+                <div className="w-8 h-8 bg-teal-600 rounded-lg flex items-center justify-center space-x-1">
+                  <div className="w-1 h-2 bg-white rounded-full animate-pulse"></div>
+                  <div className="w-1 h-3 bg-white rounded-full animate-pulse" style={{animationDelay: '0.1s'}}></div>
+                  <div className="w-1 h-4 bg-white rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></div>
+                  <div className="w-1 h-2 bg-white rounded-full animate-pulse" style={{animationDelay: '0.3s'}}></div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* 🎯 LOADING STATE: Show when creating chat */}
-        {isCreatingChat && (
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center space-x-3 text-gray-600">
-              <div className="w-6 h-6 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
-              <span>Creating your conversation...</span>
-            </div>
-          </div>
-        )}
-
         {/* Suggested Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-12">
+        <div className="flex flex-wrap items-center justify-center gap-3 mb-8">
           {suggestedActions.map((action, index) => {
             const IconComponent = action.icon;
             return (
@@ -367,30 +380,25 @@ const MainChatInterface = () => {
                 onClick={() => handleSuggestedActionClick(action)}
                 disabled={isCreatingChat}
                 className={`
-                  p-4 rounded-xl border transition-all duration-200 text-left hover:shadow-md transform hover:scale-105
-                  ${action.color} ${isCreatingChat ? 'opacity-50 cursor-not-allowed' : 'hover:border-opacity-50'}
+                  flex items-center space-x-2 px-4 py-2 rounded-full border transition-all duration-200 hover:shadow-sm
+                  ${action.color} ${isCreatingChat ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
+                title={action.example}
               >
-                <IconComponent className="w-6 h-6 mb-2" />
-                <div className="font-medium text-sm">{action.label}</div>
-                <div className="text-xs opacity-80 mt-1">
-                  "{action.example}"
-                </div>
+                <IconComponent className="w-4 h-4" />
+                <span className="text-sm font-medium">{action.label}</span>
               </button>
             );
           })}
         </div>
 
-        {/* Quick Examples */}
+        {/* Quick Examples Section */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           {quickExamples.map((example, index) => {
             const IconComponent = example.icon;
             return (
-              <div 
-                key={index} 
-                className="bg-gray-50 rounded-xl p-6 border border-gray-100 hover:shadow-md transition-all duration-200"
-              >
-                <div className={`flex items-center space-x-2 mb-3`}>
+              <div key={index} className="bg-gray-50 rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-3">
                   <IconComponent className={`h-5 w-5 ${example.color}`} />
                   <span className="text-sm font-medium text-gray-900">{example.title}</span>
                 </div>
@@ -403,7 +411,7 @@ const MainChatInterface = () => {
                       className={`
                         block w-full text-left text-xs text-gray-600 p-2 rounded transition-colors
                         ${isCreatingChat 
-                          ? 'opacity-50 cursor-not-allowed' 
+                          ? 'opacity-50 cursor-not-allowed'
                           : 'hover:text-gray-900 hover:bg-white'
                         }
                       `}

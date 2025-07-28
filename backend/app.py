@@ -11,6 +11,8 @@ from typing import Dict, Any, List, Optional
 import re
 import time
 from bson import ObjectId
+from utils.analytics_processor import TwoStageAnalyticsProcessor
+from utils.memory_rag import MemoryRAGManager, MemoryEnhancedProcessor
 
 # Configure logging
 logging.basicConfig(
@@ -1360,6 +1362,39 @@ if db is not None:
         print("✅ Complete simple processor ready (Gemini not available)")
 
 # ============================================================================
+# INITIALIZE MEMORY RAG SYSTEM
+# ============================================================================
+
+# Initialize Memory RAG system
+memory_manager = None
+memory_enhanced_processor = None
+
+if mongodb_available and db is not None:
+    try:
+        memory_manager = MemoryRAGManager(db, gemini_client)
+        logger.info("✅ Memory RAG Manager initialized")
+        print("✅ Memory RAG Manager initialized")
+        
+        # Create memory-enhanced processor
+        if two_stage_processor:
+            memory_enhanced_processor = MemoryEnhancedProcessor(two_stage_processor, memory_manager)
+            logger.info("✅ Memory-Enhanced Two-Stage Processor ready")
+            print("✅ Memory-Enhanced Two-Stage Processor ready")
+        elif simple_processor:
+            memory_enhanced_processor = MemoryEnhancedProcessor(simple_processor, memory_manager)
+            logger.info("✅ Memory-Enhanced Simple Processor ready")
+            print("✅ Memory-Enhanced Simple Processor ready")
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Memory RAG: {e}")
+        print(f"❌ Memory RAG Error: {e}")
+        memory_manager = None
+        memory_enhanced_processor = None
+else:
+    logger.warning("⚠️ MongoDB not available - Memory RAG disabled")
+    print("⚠️ MongoDB not available - Memory RAG disabled")
+
+# ============================================================================
 # CHAT API ENDPOINTS
 # ============================================================================
 
@@ -1643,17 +1678,23 @@ def health_check():
 
 @app.route('/api/query', methods=['POST'])
 def process_query():
-    """Perfected query processing with optional chat integration"""
+    """Enhanced query processing with Memory RAG integration"""
     try:
         data = request.get_json()
         user_question = data.get('question', '').strip()
-        chat_id = data.get('chat_id')  # NEW: Optional chat ID
+        chat_id = data.get('chat_id')
         
         if not user_question:
             return jsonify({"error": "Question is required"}), 400
         
-        logger.info(f"🔍 Processing question with perfected system: '{user_question}'" + 
-                   (f" (chat: {chat_id})" if chat_id else " (no chat)"))
+        # Determine if we should use memory enhancement
+        use_memory = chat_id and memory_enhanced_processor and memory_manager
+        
+        logger.info(f"🔍 Processing question: '{user_question}'" + 
+                   (f" (chat: {chat_id}, memory: {use_memory})" if chat_id else " (no chat)"))
+        
+        start_time = time.time()
+        result = None
         
         # Save user message to chat if chat_id provided
         if chat_id and mongodb_available:
@@ -1664,82 +1705,61 @@ def process_query():
             }
             save_message_to_chat(chat_id, user_message)
         
-        # Prioritize two-stage processor (AI-first approach)
-        if two_stage_processor:
+        # Process with Memory RAG if available and chat_id provided
+        if use_memory:
+            logger.info("🧠 Using Memory-Enhanced Processing")
+            
+            # Use asyncio to run the async memory processing
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
             try:
                 result = loop.run_until_complete(
-                    two_stage_processor.process_question(user_question)
+                    memory_enhanced_processor.process_with_memory(user_question, chat_id)
                 )
+                result['processing_mode'] = 'memory_enhanced'
             finally:
                 loop.close()
-            
-            if result.get("success"):
-                # Save assistant response to chat if chat_id provided
-                if chat_id and mongodb_available:
-                    assistant_message = {
-                        'type': 'assistant',
-                        'content': result.get('summary', ''),
-                        'chart_data': result.get('chart_data'),
-                        'insights': result.get('insights', []),
-                        'recommendations': result.get('recommendations', []),
-                        'validation': {
-                            'confidence': 85,
-                            'checks': [
-                                {'type': 'data_quality', 'passed': True, 'message': 'Data processed successfully'},
-                                {'type': 'response_generation', 'passed': True, 'message': 'AI response generated successfully'}
-                            ]
-                        },
-                        'query_response': result,  # Store full response for reference
-                        'timestamp': datetime.utcnow()
-                    }
-                    save_message_to_chat(chat_id, assistant_message)
                 
-                logger.info(f"✅ Perfected query successful: {result.get('results_count', 0)} results")
-                return jsonify(result)
-            else:
-                logger.error(f"❌ Perfected query failed: {result.get('error')}")
-                return jsonify(result), 400
-        
-        elif simple_processor:
-            # Fallback to simple processor
-            result = simple_processor.process_question(user_question)
-            
-            if result.get("success"):
-                # Save to chat if chat_id provided
-                if chat_id and mongodb_available:
-                    assistant_message = {
-                        'type': 'assistant',
-                        'content': result.get('summary', ''),
-                        'chart_data': result.get('chart_data'),
-                        'insights': result.get('insights', []),
-                        'recommendations': result.get('recommendations', []),
-                        'query_response': result,
-                        'timestamp': datetime.utcnow()
-                    }
-                    save_message_to_chat(chat_id, assistant_message)
-                
-                result["query_source"] = "simple_only"
-                result["ai_powered"] = False
-                logger.info(f"✅ Simple query successful: {result.get('results_count', 0)} results")
-                return jsonify(result)
-            else:
-                logger.error(f"❌ Simple query failed: {result.get('error')}")
-                return jsonify(result), 400
-        
         else:
-            return jsonify({
-                "error": "No query processor available",
-                "details": "System not properly initialized"
-            }), 503
+            # Fallback to regular processing
+            logger.info("🔄 Using Standard Processing")
             
+            if two_stage_processor:
+                result = two_stage_processor.process_question(user_question)
+                result['processing_mode'] = 'two_stage'
+            elif simple_processor:
+                result = simple_processor.process_question(user_question)
+                result['processing_mode'] = 'simple'
+            else:
+                return jsonify({"error": "No processors available"}), 503
+        
+        execution_time = time.time() - start_time
+        result['execution_time'] = round(execution_time, 3)
+        
+        # Save AI response to chat
+        if chat_id and mongodb_available and result.get('success'):
+            ai_message = {
+                'type': 'assistant',
+                'content': result.get('summary', 'Analysis completed'),
+                'chart_data': result.get('chart_data'),
+                'insights': result.get('insights'),
+                'recommendations': result.get('recommendations'),
+                'memory_context': result.get('memory_context'),
+                'processing_mode': result.get('processing_mode'),
+                'timestamp': datetime.utcnow()
+            }
+            save_message_to_chat(chat_id, ai_message)
+        
+        logger.info(f"✅ Query processed successfully in {execution_time:.3f}s")
+        return jsonify(result)
+        
     except Exception as e:
-        logger.error(f"❌ Critical error in perfected query processing: {str(e)}")
+        error_msg = f"Query processing failed: {str(e)}"
+        logger.error(error_msg)
         return jsonify({
-            "error": "Internal server error",
-            "details": str(e)
+            "success": False,
+            "error": error_msg,
+            "processing_mode": "error"
         }), 500
 
 @app.route('/api/system/test', methods=['POST'])
@@ -2085,6 +2105,88 @@ def get_chat_statistics():
             "error": "Failed to retrieve chat statistics",
             "details": str(e)
         }), 500
+
+# ============================================================================
+# MEMORY RAG ENDPOINTS
+# ============================================================================
+
+@app.route('/api/memory/stats/<chat_id>', methods=['GET'])
+def get_memory_stats(chat_id):
+    """Get memory statistics for a specific chat"""
+    if not memory_manager:
+        return jsonify({"error": "Memory RAG not available"}), 503
+    
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            stats = loop.run_until_complete(memory_manager.get_chat_memory_stats(chat_id))
+            return jsonify({
+                "success": True,
+                "chat_id": chat_id,
+                "memory_stats": stats
+            })
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"Failed to get memory stats for {chat_id}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/memory/search/<chat_id>', methods=['POST'])
+def search_memories(chat_id):
+    """Search memories in a specific chat"""
+    if not memory_manager:
+        return jsonify({"error": "Memory RAG not available"}), 503
+    
+    try:
+        data = request.get_json()
+        search_query = data.get('query', '')
+        limit = data.get('limit', 10)
+        
+        if not search_query:
+            return jsonify({"error": "Search query required"}), 400
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            memories = loop.run_until_complete(
+                memory_manager.retrieve_relevant_memories(chat_id, search_query, limit)
+            )
+            
+            # Convert to JSON-serializable format
+            memory_data = [
+                {
+                    "fragment_id": mem.fragment_id,
+                    "content": mem.content,
+                    "content_type": mem.content_type,
+                    "importance_score": mem.importance_score,
+                    "keywords": mem.keywords,
+                    "entities": mem.entities,
+                    "timestamp": mem.timestamp.isoformat(),
+                    "access_count": mem.access_count,
+                    "last_accessed": mem.last_accessed.isoformat() if mem.last_accessed else None
+                } for mem in memories
+            ]
+            
+            return jsonify({
+                "success": True,
+                "search_query": search_query,
+                "results_count": len(memory_data),
+                "memories": memory_data
+            })
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"Failed to search memories for {chat_id}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500 
 
 if __name__ == '__main__':
     print("\n🔗 Starting PERFECTED AI Analytics Server with Chat...")
