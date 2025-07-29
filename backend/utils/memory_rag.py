@@ -1,12 +1,13 @@
 # backend/utils/memory_rag.py
 """
 Advanced Memory RAG System for Conversational AI
-
+Enhanced with Smart Suggestions Generation
 """
 
 import logging
 import json
 import re
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
@@ -52,6 +53,211 @@ class ConversationContext:
     conversation_themes: List[str]
     recent_entities: List[str]
     session_context: Dict[str, Any]
+
+
+class SmartSuggestionGenerator:
+    """
+    Generates intelligent follow-up questions using conversation context
+    FIXED for BulletproofGeminiClient compatibility
+    """
+    
+    def __init__(self, gemini_client, memory_manager=None):
+        self.gemini_client = gemini_client
+        self.memory_manager = memory_manager
+        
+        # Default fallback suggestions
+        self.default_suggestions = [
+            'Show this as a different chart type',
+            'What are the monthly trends?',
+            'How does this compare to last year?',
+            'Show me the top 10 results',
+            'Break this down by region',
+            'Analyze the seasonal patterns'
+        ]
+        
+        # Database schema awareness for generating answerable questions
+        self.available_collections = ['sales', 'products', 'customers', 'user_engagement']
+        self.available_fields = {
+            'sales': ['order_id', 'customer_id', 'product_id', 'product_name', 'category', 
+                     'quantity', 'unit_price', 'total_amount', 'discount', 'date', 'month', 
+                     'quarter', 'sales_rep', 'region'],
+            'products': ['product_id', 'name', 'category', 'brand', 'price', 'cost', 
+                        'stock', 'rating', 'reviews_count'],
+            'customers': ['customer_id', 'name', 'email', 'age', 'gender', 'country', 
+                         'state', 'city', 'customer_segment', 'total_spent', 'order_count']
+        }
+    
+    async def generate_smart_suggestions(self, chat_id: str, current_result: Dict, 
+                                       user_question: str) -> List[str]:
+        """
+        Generate context-aware follow-up suggestions
+        Returns default suggestions if AI generation fails (failsafe)
+        """
+        try:
+            # Quick background generation - don't block main response
+            suggestions = await asyncio.wait_for(
+                self._generate_contextual_suggestions(chat_id, current_result, user_question),
+                timeout=5.0  # 5 second timeout to not delay UI
+            )
+            
+            # Validate suggestions are answerable by our system
+            validated_suggestions = self._validate_suggestions(suggestions)
+            
+            if len(validated_suggestions) >= 3:
+                logger.info(f"✅ Generated {len(validated_suggestions)} smart suggestions")
+                return validated_suggestions[:6]  # Max 6 suggestions
+            else:
+                logger.info("🔄 Using default suggestions (validation failed)")
+                return self.default_suggestions
+                
+        except asyncio.TimeoutError:
+            logger.info("⏱️ Suggestion generation timeout - using defaults")
+            return self.default_suggestions
+        except Exception as e:
+            logger.error(f"❌ Suggestion generation failed: {e}")
+            return self.default_suggestions
+    
+    async def _generate_contextual_suggestions(self, chat_id: str, current_result: Dict, 
+                                             user_question: str) -> List[str]:
+        """Generate suggestions using BulletproofGeminiClient with correct interface"""
+        
+        # Check if the client is available
+        if not hasattr(self.gemini_client, 'available') or not self.gemini_client.available:
+            logger.warning("⚠️ Gemini client not available for suggestions")
+            return []
+        
+        # Build context from memory if available
+        memory_context = ""
+        if self.memory_manager and chat_id:
+            try:
+                context = await self.memory_manager.build_conversation_context(chat_id, user_question)
+                memory_context = f"""
+CONVERSATION CONTEXT:
+- Themes: {', '.join(context.conversation_themes[:3])}
+- Recent entities: {', '.join(context.recent_entities[:5])}
+- User preferences: {json.dumps(context.user_preferences) if context.user_preferences else 'None'}
+"""
+            except Exception as e:
+                logger.warning(f"Failed to build memory context: {e}")
+                memory_context = ""
+        
+        # Extract key info from current result
+        chart_type = current_result.get('chart_data', {}).get('type', 'unknown')
+        summary = current_result.get('summary', '')
+        insights = current_result.get('insights', [])
+        data_points = len(current_result.get('chart_data', {}).get('data', {}).get('labels', []))
+        
+        # Create intelligent prompt
+        prompt = f"""
+You are an analytics assistant. Based on the user's question and current results, generate 5 smart follow-up questions that naturally extend the analysis.
+
+USER QUESTION: "{user_question}"
+
+CURRENT ANALYSIS:
+- Chart type: {chart_type}
+- Summary: {summary}
+- Key insights: {'; '.join(insights[:2]) if insights else 'None'}
+- Data points shown: {data_points}
+
+{memory_context}
+
+AVAILABLE DATA STRUCTURE:
+- Sales data: order_id, customer_id, product_name, category, quantity, unit_price, total_amount, date, month, quarter, region
+- Product data: name, category, brand, price, cost, stock, rating
+- Customer data: customer_segment, age, gender, country, state, city, total_spent
+
+GENERATE 5 follow-up questions that:
+1. Build naturally on the current analysis
+2. Can be answered with the available data fields
+3. Provide deeper business insights
+4. Use conversational, business-friendly language
+5. Focus on actionable analysis (trends, comparisons, segments)
+
+Examples of good follow-ups:
+- "What drove the January sales spike?"
+- "Which product categories performed best?"
+- "How do our top customers compare by region?"
+- "What's the seasonal pattern in this data?"
+
+Return ONLY a JSON array of 5 question strings, no other text:
+["question 1", "question 2", "question 3", "question 4", "question 5"]
+"""
+
+        try:
+            # 🚀 FIX: Use the correct method from BulletproofGeminiClient
+            # Your client uses model.generate_content() directly
+            response = self.gemini_client.model.generate_content(
+                prompt,
+                generation_config={
+                    'temperature': 0.3,
+                    'max_output_tokens': 500,
+                    'top_p': 0.8
+                }
+            )
+            
+            # Extract JSON from response
+            response_text = response.text.strip()
+            
+            # Find JSON array in response
+            json_match = re.search(r'\[.*?\]', response_text, re.DOTALL)
+            if json_match:
+                suggestions_json = json_match.group()
+                suggestions = json.loads(suggestions_json)
+                
+                if isinstance(suggestions, list) and len(suggestions) > 0:
+                    return [str(s).strip() for s in suggestions if s.strip()]
+            
+            logger.warning("⚠️ Failed to parse Gemini suggestions response")
+            return []
+            
+        except Exception as e:
+            logger.error(f"❌ Gemini suggestion generation failed: {e}")
+            return []
+    
+    def _validate_suggestions(self, suggestions: List[str]) -> List[str]:
+        """
+        Validate that suggestions can likely be answered by our system
+        Filter out questions that reference unavailable data
+        """
+        validated = []
+        
+        # Keywords that indicate answerable questions
+        good_keywords = [
+            'sales', 'revenue', 'customers', 'products', 'category', 'region', 
+            'month', 'quarter', 'trends', 'compare', 'top', 'bottom', 'best', 
+            'worst', 'segment', 'price', 'cost', 'rating', 'brand', 'age',
+            'country', 'state', 'city', 'total', 'average', 'highest', 'lowest'
+        ]
+        
+        # Keywords that indicate potentially problematic questions
+        bad_keywords = [
+            'external', 'api', 'real-time', 'live', 'current', 'today',
+            'competitor', 'market share', 'social media', 'weather',
+            'stock price', 'exchange rate', 'gdp', 'inflation'
+        ]
+        
+        for suggestion in suggestions:
+            suggestion_lower = suggestion.lower()
+            
+            # Check for bad keywords
+            has_bad_keywords = any(bad_word in suggestion_lower for bad_word in bad_keywords)
+            if has_bad_keywords:
+                continue
+            
+            # Check for good keywords or general analytical patterns
+            has_good_keywords = any(good_word in suggestion_lower for good_word in good_keywords)
+            has_analytical_pattern = any(pattern in suggestion_lower for pattern in [
+                'what', 'which', 'how', 'show', 'compare', 'analyze', 'breakdown'
+            ])
+            
+            if has_good_keywords or has_analytical_pattern:
+                validated.append(suggestion)
+        
+        return validated
+
+    def get_default_suggestions(self) -> List[str]:
+        """Get the default fallback suggestions"""
+        return self.default_suggestions.copy()
 
 class MemoryRAGManager:
     """
@@ -516,14 +722,21 @@ class MemoryRAGManager:
 class MemoryEnhancedProcessor:
     """
     Enhanced processor that integrates Memory RAG with existing analytics
+    NOW WITH SMART SUGGESTIONS!
     """
     
-    def __init__(self, base_processor, memory_manager: MemoryRAGManager):
+    def __init__(self, base_processor, memory_manager: MemoryRAGManager, gemini_client=None):
         self.base_processor = base_processor
         self.memory_manager = memory_manager
+        
+        # Initialize smart suggestion generator if Gemini is available
+        self.suggestion_generator = None
+        if gemini_client:
+            self.suggestion_generator = SmartSuggestionGenerator(gemini_client, memory_manager)
+            logger.info("✅ Smart Suggestion Generator initialized")
     
     async def process_with_memory(self, question: str, chat_id: str) -> Dict[str, Any]:
-        """Process question with full memory context"""
+        """Process question with full memory context AND smart suggestions"""
         try:
             # Build conversation context
             context = await self.memory_manager.build_conversation_context(chat_id, question)
@@ -542,7 +755,7 @@ class MemoryEnhancedProcessor:
             # Enhanced question with memory context
             enhanced_question = f"{memory_context}\nUSER QUESTION: {question}"
             
-            # Process with base processor
+            # Process with base processor (YOUR EXISTING FLOW - UNCHANGED)
             result = await self.base_processor.process_question(enhanced_question)
             
             # Store the AI response as memory
@@ -569,12 +782,68 @@ class MemoryEnhancedProcessor:
                 'preferences': context.user_preferences
             }
             
+            # 🚀 NEW: Generate smart suggestions in background (non-blocking)
+            if self.suggestion_generator and result.get('success'):
+                try:
+                    # Start suggestion generation task but don't wait for it
+                    suggestion_task = asyncio.create_task(
+                        self.suggestion_generator.generate_smart_suggestions(
+                            chat_id, result, question
+                        )
+                    )
+                    
+                    # Try to get suggestions quickly, but don't block
+                    try:
+                        smart_suggestions = await asyncio.wait_for(suggestion_task, timeout=2.0)
+                        result['suggested_questions'] = smart_suggestions
+                        logger.info(f"✅ Smart suggestions generated: {len(smart_suggestions)}")
+                    except asyncio.TimeoutError:
+                        # Return default suggestions immediately, let background task continue
+                        result['suggested_questions'] = self.suggestion_generator.get_default_suggestions()
+                        logger.info("⏱️ Using default suggestions (background generation continuing)")
+                        
+                        # Schedule background completion (optional)
+                        asyncio.create_task(self._complete_suggestion_background(suggestion_task, chat_id))
+                        
+                except Exception as e:
+                    logger.error(f"❌ Suggestion generation error: {e}")
+                    result['suggested_questions'] = self.suggestion_generator.get_default_suggestions()
+            else:
+                # Fallback to default suggestions if no generator available
+                default_suggestions = [
+                    'Show this as a different chart type',
+                    'What are the monthly trends?',
+                    'How does this compare to last year?',
+                    'Show me the top 10 results',
+                    'Break this down by region',
+                    'Analyze the seasonal patterns'
+                ]
+                result['suggested_questions'] = default_suggestions
+            
             return result
             
         except Exception as e:
             logger.error(f"Memory-enhanced processing failed: {e}")
             # Fallback to base processor
-            return await self.base_processor.process_question(question)
+            result = await self.base_processor.process_question(question)
+            
+            # Add default suggestions even in fallback
+            result['suggested_questions'] = [
+                'Show this as a different chart type',
+                'What are the monthly trends?',
+                'How does this compare to last year?'
+            ]
+            
+            return result
+    
+    async def _complete_suggestion_background(self, suggestion_task, chat_id):
+        """Complete suggestion generation in background and optionally store"""
+        try:
+            smart_suggestions = await suggestion_task
+            logger.info(f"🔥 Background suggestion generation completed for chat {chat_id}")
+            # Could store these for future use or send via websocket if implemented
+        except Exception as e:
+            logger.error(f"Background suggestion completion failed: {e}")
     
     async def _extract_and_store_insights(self, chat_id: str, question: str, result: Dict):
         """Extract and store insights as memories"""
@@ -600,11 +869,12 @@ class MemoryEnhancedProcessor:
             # Store important facts from results
             if result.get('insights'):
                 for insight in result['insights']:
-                    await self.memory_manager.store_memory(
-                        chat_id=chat_id,
-                        content=f"Fact: {insight}",
-                        content_type='fact'
-                    )
+                    if len(insight.strip()) > 20:  # Only meaningful insights
+                        await self.memory_manager.store_memory(
+                            chat_id=chat_id,
+                            content=f"Fact: {insight}",
+                            content_type='fact'
+                        )
                     
         except Exception as e:
             logger.error(f"Failed to extract insights: {e}")

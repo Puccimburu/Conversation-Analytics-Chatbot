@@ -1375,15 +1375,23 @@ if mongodb_available and db is not None:
         logger.info("✅ Memory RAG Manager initialized")
         print("✅ Memory RAG Manager initialized")
         
-        # Create memory-enhanced processor
+        # Create memory-enhanced processor WITH Gemini client for smart suggestions
         if two_stage_processor:
-            memory_enhanced_processor = MemoryEnhancedProcessor(two_stage_processor, memory_manager)
-            logger.info("✅ Memory-Enhanced Two-Stage Processor ready")
-            print("✅ Memory-Enhanced Two-Stage Processor ready")
+            memory_enhanced_processor = MemoryEnhancedProcessor(
+                two_stage_processor, 
+                memory_manager, 
+                gemini_client  # 🚀 NEW: Pass Gemini client for smart suggestions
+            )
+            logger.info("✅ Memory-Enhanced Two-Stage Processor ready with Smart Suggestions")
+            print("✅ Memory-Enhanced Two-Stage Processor ready with Smart Suggestions")
         elif simple_processor:
-            memory_enhanced_processor = MemoryEnhancedProcessor(simple_processor, memory_manager)
-            logger.info("✅ Memory-Enhanced Simple Processor ready")
-            print("✅ Memory-Enhanced Simple Processor ready")
+            memory_enhanced_processor = MemoryEnhancedProcessor(
+                simple_processor, 
+                memory_manager, 
+                gemini_client  # 🚀 NEW: Pass Gemini client for smart suggestions
+            )
+            logger.info("✅ Memory-Enhanced Simple Processor ready with Smart Suggestions")
+            print("✅ Memory-Enhanced Simple Processor ready with Smart Suggestions")
             
     except Exception as e:
         logger.error(f"❌ Failed to initialize Memory RAG: {e}")
@@ -2199,6 +2207,7 @@ if __name__ == '__main__':
     print("   - ✅ NEW: Complete chat session management")
     print("   - ✅ NEW: Real-time message persistence")
     print("   - ✅ NEW: Chat history and search")
+    print("   - ✅ NEW: Smart context-aware follow-up suggestions")
     
     print("\n🔧 System Status:")
     if mongodb_available:
