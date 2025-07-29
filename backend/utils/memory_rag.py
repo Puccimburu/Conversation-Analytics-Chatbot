@@ -1,13 +1,13 @@
 # backend/utils/memory_rag.py
 """
 Advanced Memory RAG System for Conversational AI
-Implements ChatGPT-like memory within chat sessions
+
 """
 
 import logging
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 import pymongo
@@ -15,6 +15,17 @@ from bson import ObjectId
 import hashlib
 
 logger = logging.getLogger(__name__)
+
+# Helper function for timezone-aware datetime (compatible with all Python versions)
+def utc_now():
+    """Get current UTC time - compatible with all Python versions"""
+    try:
+        return datetime.now(timezone.utc)
+    except AttributeError:
+        # Fallback for older Python versions
+        import warnings
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        return datetime.utcnow()
 
 @dataclass
 class MemoryFragment:
@@ -72,31 +83,28 @@ class MemoryRAGManager:
             # Text search indexes
             self.memory_collection.create_index([("content", "text"), ("keywords", "text")])
             self.memory_collection.create_index([("chat_id", 1), ("content_type", 1)])
-            self.memory_collection.create_index([("chat_id", 1), ("entities", 1)])
             
-            logger.info("✅ Memory RAG indexes created successfully")
-            return True
+            logger.info("✅ Memory collection indexes ensured")
+            
         except Exception as e:
             logger.error(f"Failed to create memory indexes: {e}")
-            return False
-    
-    def generate_fragment_id(self, chat_id: str, content: str) -> str:
-        """Generate unique fragment ID"""
-        timestamp = str(datetime.utcnow().timestamp())
-        content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
-        return f"mem_{chat_id}_{timestamp}_{content_hash}"
     
     def extract_keywords_and_entities(self, text: str) -> Tuple[List[str], List[str]]:
-        """Extract keywords and entities from text"""
-        # Simple keyword extraction (can be enhanced with NLP)
-        words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
-        keywords = list(set([w for w in words if len(w) > 3]))[:10]
-        
-        # Simple entity extraction (numbers, capitalized words, common patterns)
+        """Extract keywords and entities from text using simple NLP"""
+        keywords = []
         entities = []
         
-        # Numbers and monetary values
-        entities.extend(re.findall(r'\$?[\d,]+\.?\d*', text))
+        # Simple keyword extraction
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+        
+        # Filter out common stop words
+        stop_words = {'the', 'and', 'but', 'for', 'are', 'with', 'this', 'that', 'from', 'they', 'have', 'been', 'was', 'were', 'said', 'each', 'which', 'their', 'time', 'will', 'about', 'can', 'would', 'there', 'what', 'some', 'had', 'them', 'these', 'may', 'like', 'use', 'into', 'than', 'more', 'very', 'when', 'much', 'how', 'where', 'why', 'who'}
+        keywords = [word for word in words if word not in stop_words][:10]
+        
+        # Extract dates, numbers, and monetary values
+        entities.extend(re.findall(r'\b\d{1,2}/\d{1,2}/\d{4}\b', text))  # Dates
+        entities.extend(re.findall(r'\$\d+\.?\d*', text))  # Money
+        entities.extend(re.findall(r'\b\d+\.?\d*', text))
         
         # Capitalized words (potential names/places)
         entities.extend(re.findall(r'\b[A-Z][a-z]+\b', text))
@@ -107,144 +115,144 @@ class MemoryRAGManager:
         
         return keywords[:10], list(set(entities))[:15]
     
-    def calculate_importance_score(self, content: str, content_type: str, context: Dict = None) -> float:
-        """Calculate importance score for memory fragment"""
-        base_score = 0.5
-        
-        # Content type weights
-        type_weights = {
-            'preference': 0.9,    # User preferences are very important
-            'fact': 0.8,          # Important facts
-            'question': 0.6,      # User questions
-            'answer': 0.7,        # AI responses
-            'context': 0.4        # Background context
+    def calculate_enhanced_importance(self, content: str, content_type: str, context: Dict = None) -> float:
+        """Enhanced importance scoring with multiple factors"""
+        if context is None:
+            context = {}
+            
+        # Base scores (keep your existing logic)
+        base_scores = {
+            'question': 0.7,
+            'answer': 0.8,
+            'preference': 0.9,
+            'fact': 0.6,
+            'context': 0.4
         }
         
-        score = type_weights.get(content_type, 0.5)
+        importance = base_scores.get(content_type, 0.5)
         
-        # Length bonus (longer content often more important)
-        if len(content) > 100:
-            score += 0.1
-        if len(content) > 500:
-            score += 0.1
+        # ENHANCEMENT: Pattern-based importance boosts
+        try:
+            content_lower = content.lower()
+            
+            # User preferences and needs (HIGH PRIORITY)
+            if re.search(r'\b(prefer|like|want|need|always|never)\b', content_lower):
+                importance += 0.2
+            
+            # Business metrics and KPIs
+            if re.search(r'\b(revenue|profit|sales|growth|performance|trend|compare|versus)\b', content_lower):
+                importance += 0.15
+            
+            # Temporal references (recent context)
+            if re.search(r'\b(yesterday|today|this week|last month|recent|latest)\b', content_lower):
+                importance += 0.1
+            
+            # Specific numbers and dates (concrete data)
+            if re.search(r'\b(\d{4}|\$\d+|\d+%|\d+\.?\d*[KMB]?)\b', content_lower):
+                importance += 0.05
+                
+        except Exception as e:
+            # If pattern matching fails, use base score (SAFE)
+            logger.warning(f"Pattern matching failed for importance scoring: {e}")
         
-        # Keyword importance boost
-        important_keywords = ['prefer', 'like', 'want', 'need', 'always', 'never', 'important', 'remember']
-        for keyword in important_keywords:
-            if keyword in content.lower():
-                score += 0.15
+        # ENHANCEMENT: Recency factor
+        try:
+            if context.get('timestamp'):
+                hours_old = (utc_now() - context['timestamp']).total_seconds() / 3600
+                recency_factor = max(0, 1 - (hours_old / 168))  # Decay over a week
+                importance *= (0.7 + 0.3 * recency_factor)
+        except:
+            # If recency calculation fails, skip it (SAFE)
+            pass
         
-        # Numbers and data boost
-        if re.search(r'\d+', content):
-            score += 0.1
+        # ENHANCEMENT: Recent conversation turns bonus
+        try:
+            if context.get('turn') and context['turn'] <= 5:
+                importance += 0.1  # Recent conversation turns are more important
+        except:
+            # If turn calculation fails, skip it (SAFE)
+            pass
         
-        return min(1.0, score)
+        # Cap at 1.0 and ensure minimum of 0.1
+        return max(0.1, min(1.0, importance))
     
     async def store_memory(self, chat_id: str, content: str, content_type: str, 
                           related_to: List[str] = None, context: Dict = None) -> str:
-        """Store a new memory fragment"""
+        """Store a new memory fragment with enhanced importance scoring"""
         try:
+            if context is None:
+                context = {}
+                
             # Extract keywords and entities
             keywords, entities = self.extract_keywords_and_entities(content)
             
-            # Calculate importance
-            importance = self.calculate_importance_score(content, content_type, context)
+            # Calculate enhanced importance score
+            importance_score = self.calculate_enhanced_importance(content, content_type, context)
             
-            # Create memory fragment
-            fragment = MemoryFragment(
-                fragment_id=self.generate_fragment_id(chat_id, content),
-                chat_id=chat_id,
-                content=content,
-                content_type=content_type,
-                timestamp=datetime.utcnow(),
-                importance_score=importance,
-                keywords=keywords,
-                entities=entities,
-                related_fragments=related_to or []
-            )
+            # Generate unique fragment ID
+            fragment_id = f"mem_{chat_id}_{utc_now().timestamp()}_{hashlib.md5(content.encode()).hexdigest()[:8]}"
             
-            # Store in MongoDB
-            result = self.memory_collection.insert_one(asdict(fragment))
+            memory_doc = {
+                "fragment_id": fragment_id,
+                "chat_id": chat_id,
+                "content": content,
+                "content_type": content_type,
+                "timestamp": utc_now(),
+                "importance_score": importance_score,
+                "keywords": keywords,
+                "entities": entities,
+                "related_fragments": related_to or [],
+                "access_count": 0,
+                "context": context
+            }
             
-            if result.inserted_id:
-                logger.info(f"✅ Stored memory fragment: {fragment.fragment_id}")
-                
-                # Cleanup old memories if needed
-                await self.cleanup_old_memories(chat_id)
-                
-                return fragment.fragment_id
-            else:
-                logger.error("Failed to store memory fragment")
-                return None
-                
+            # Store in database
+            self.memory_collection.insert_one(memory_doc)
+            
+            logger.info(f"✅ Stored memory fragment: {fragment_id} (importance: {importance_score:.2f})")
+            
+            # Cleanup old memories if needed
+            await self.cleanup_old_memories(chat_id)
+            
+            return fragment_id
+            
         except Exception as e:
             logger.error(f"Failed to store memory: {e}")
             return None
     
-    async def retrieve_relevant_memories(self, chat_id: str, current_input: str, 
-                                       limit: int = 10) -> List[MemoryFragment]:
-        """Retrieve memories relevant to current input"""
+    async def retrieve_relevant_memories(self, chat_id: str, query: str, limit: int = 6) -> List[MemoryFragment]:
+        """Retrieve relevant memories for a given query"""
         try:
-            # Extract keywords from current input
-            keywords, entities = self.extract_keywords_and_entities(current_input)
-            
-            # Build MongoDB aggregation pipeline for relevance scoring
+            # Build aggregation pipeline for smart memory retrieval
             pipeline = [
+                # Match memories for this chat
                 {"$match": {"chat_id": chat_id}},
+                
+                # Add relevance score based on text similarity and importance
                 {
                     "$addFields": {
                         "relevance_score": {
                             "$add": [
-                                # Base importance score
                                 "$importance_score",
-                                
-                                # Keyword overlap bonus
                                 {
-                                    "$multiply": [
-                                        0.3,
-                                        {"$size": {"$setIntersection": ["$keywords", keywords]}}
-                                    ]
-                                },
-                                
-                                # Entity overlap bonus
-                                {
-                                    "$multiply": [
-                                        0.4,
-                                        {"$size": {"$setIntersection": ["$entities", entities]}}
-                                    ]
-                                },
-                                
-                                # Recent access bonus
-                                {
-                                    "$cond": [
-                                        {"$gt": ["$access_count", 0]},
-                                        {"$multiply": [0.1, {"$ln": {"$add": [1, "$access_count"]}}]},
-                                        0
-                                    ]
-                                },
-                                
-                                # Recency bonus (more recent = higher score)
-                                {
-                                    "$multiply": [
-                                        0.2,
-                                        {
-                                            "$divide": [
-                                                {"$subtract": [datetime.utcnow(), "$timestamp"]},
-                                                86400000  # milliseconds in a day
-                                            ]
-                                        }
-                                    ]
+                                    "$cond": {
+                                        "if": {"$regexMatch": {"input": "$content", "regex": query, "options": "i"}},
+                                        "then": 0.3,
+                                        "else": 0
+                                    }
                                 }
                             ]
                         }
                     }
                 },
-                {"$match": {"relevance_score": {"$gte": self.relevance_threshold}}},
-                {"$sort": {"relevance_score": -1}},
+                
+                # Sort by relevance score and recency
+                {"$sort": {"relevance_score": -1, "timestamp": -1}},
+                
+                # Limit results
                 {"$limit": limit}
             ]
             
-            # Execute aggregation
             results = list(self.memory_collection.aggregate(pipeline))
             
             # Convert to MemoryFragment objects
@@ -255,7 +263,7 @@ class MemoryRAGManager:
                     {"fragment_id": doc["fragment_id"]},
                     {
                         "$inc": {"access_count": 1},
-                        "$set": {"last_accessed": datetime.utcnow()}
+                        "$set": {"last_accessed": utc_now()}
                     }
                 )
                 
@@ -343,47 +351,106 @@ class MemoryRAGManager:
             )
     
     def format_memory_context_for_ai(self, context: ConversationContext, max_tokens: int = 4000) -> str:
-        """Format memory context for AI prompt"""
+        """Enhanced memory context formatter with better token management and timezone safety"""
         try:
-            formatted_context = []
+            formatted_parts = []
+            token_estimate = 0
             
-            # Add conversation metadata
-            formatted_context.append(f"=== CONVERSATION CONTEXT (Turn {context.current_turn}) ===")
+            # Header (always include)
+            header = f"=== CONVERSATION CONTEXT (Turn {context.current_turn}) ==="
+            formatted_parts.append(header)
+            token_estimate += len(header) // 4  # Rough token estimation
             
-            # Add user preferences
+            # Add user preferences (high priority)
             if context.user_preferences:
-                formatted_context.append("\n👤 USER PREFERENCES:")
-                for pref_type, pref_value in context.user_preferences.items():
-                    formatted_context.append(f"   - {pref_type}: {pref_value}")
+                formatted_parts.append("\n👤 USER PREFERENCES:")
+                for pref_type, pref_value in list(context.user_preferences.items())[:3]:  # Limit to 3
+                    pref_line = f"   - {pref_type}: {pref_value}"
+                    if token_estimate + len(pref_line) // 4 < max_tokens * 0.2:
+                        formatted_parts.append(pref_line)
+                        token_estimate += len(pref_line) // 4
             
             # Add conversation themes
             if context.conversation_themes:
-                formatted_context.append(f"\n🎯 CONVERSATION THEMES: {', '.join(context.conversation_themes)}")
+                themes_line = f"\n🎯 CONVERSATION THEMES: {', '.join(context.conversation_themes[:5])}"
+                if token_estimate + len(themes_line) // 4 < max_tokens * 0.15:
+                    formatted_parts.append(themes_line)
+                    token_estimate += len(themes_line) // 4
             
             # Add recent entities
             if context.recent_entities:
-                formatted_context.append(f"\n🏷️ RECENT ENTITIES: {', '.join(context.recent_entities[:8])}")
+                entities_line = f"\n🏷️ RECENT ENTITIES: {', '.join(context.recent_entities[:6])}"
+                if token_estimate + len(entities_line) // 4 < max_tokens * 0.15:
+                    formatted_parts.append(entities_line)
+                    token_estimate += len(entities_line) // 4
             
-            # Add relevant memories
+            # Add relevant memories (prioritized)
             if context.relevant_memories:
-                formatted_context.append("\n📚 RELEVANT MEMORY:")
+                formatted_parts.append("\n📚 RELEVANT MEMORY:")
                 
-                for i, memory in enumerate(context.relevant_memories[:6]):
-                    age = datetime.utcnow() - memory.timestamp
-                    age_str = f"{age.days}d ago" if age.days > 0 else f"{age.seconds//3600}h ago"
-                    
-                    formatted_context.append(f"   [{memory.content_type.upper()}, {age_str}] {memory.content[:200]}...")
-                    
-                    if len('\n'.join(formatted_context)) > max_tokens:
-                        break
+                # Sort by recency AND importance (SAFE - won't break existing logic)
+                try:
+                    sorted_memories = sorted(
+                        context.relevant_memories,
+                        key=lambda m: (
+                            getattr(m.timestamp, 'timestamp', lambda: 0)() if hasattr(m.timestamp, 'timestamp') else 0, 
+                            getattr(m, 'importance_score', 0.5)
+                        ),
+                        reverse=True
+                    )
+                except Exception as sort_error:
+                    # Fallback to original order if sorting fails
+                    logger.warning(f"Memory sorting failed, using original order: {sort_error}")
+                    sorted_memories = context.relevant_memories
+                
+                for memory in sorted_memories[:4]:  # Limit to top 4
+                    try:
+                        # TIMEZONE-SAFE age calculation
+                        current_time = utc_now()
+                        memory_time = memory.timestamp
+                        
+                        # Handle timezone mismatch (old vs new memories)
+                        if memory_time.tzinfo is None:
+                            # Old memory without timezone - make it UTC aware
+                            memory_time = memory_time.replace(tzinfo=timezone.utc)
+                        elif current_time.tzinfo is None:
+                            # Current time without timezone - make it UTC aware  
+                            current_time = current_time.replace(tzinfo=timezone.utc)
+                        
+                        # Calculate age safely
+                        try:
+                            age = current_time - memory_time
+                            age_str = f"{age.days}d ago" if age.days > 0 else f"{age.seconds//3600}h ago"
+                        except Exception as age_error:
+                            # Ultimate fallback if age calculation still fails
+                            logger.warning(f"Age calculation failed, using fallback: {age_error}")
+                            age_str = "recent"
+                        
+                        # Smart truncation based on available space
+                        max_content_len = 150 if token_estimate < max_tokens * 0.6 else 100
+                        content = memory.content[:max_content_len] + "..." if len(memory.content) > max_content_len else memory.content
+                        memory_line = f"   [{memory.content_type.upper()}, {age_str}] {content}"
+                        
+                        # Check token limit before adding
+                        if token_estimate + len(memory_line) // 4 > max_tokens * 0.8:
+                            break
+                            
+                        formatted_parts.append(memory_line)
+                        token_estimate += len(memory_line) // 4
+                        
+                    except Exception as memory_error:
+                        # Skip problematic memory, don't break the whole process
+                        logger.warning(f"Skipping memory due to error: {memory_error}")
+                        continue
             
-            formatted_context.append("\n=== END CONTEXT ===\n")
+            formatted_parts.append("\n=== END CONTEXT ===\n")
             
-            return '\n'.join(formatted_context)
+            return '\n'.join(formatted_parts)
             
         except Exception as e:
             logger.error(f"Failed to format memory context: {e}")
-            return "=== CONVERSATION CONTEXT ===\n[Error loading context]\n=== END CONTEXT ===\n"
+            # SAFE FALLBACK - return basic context if enhancement fails
+            return f"=== CONVERSATION CONTEXT (Turn {context.current_turn}) ===\n[Context loading error: {str(e)}]\n=== END CONTEXT ===\n"
     
     async def cleanup_old_memories(self, chat_id: str):
         """Clean up old or low-importance memories"""
@@ -393,40 +460,25 @@ class MemoryRAGManager:
             
             if memory_count > self.max_memory_fragments:
                 # Remove oldest, least important memories
-                memories_to_remove = memory_count - self.max_memory_fragments
+                old_memories = list(self.memory_collection.find(
+                    {"chat_id": chat_id}
+                ).sort([("importance_score", 1), ("timestamp", 1)]).limit(memory_count - self.max_memory_fragments))
                 
-                pipeline = [
-                    {"$match": {"chat_id": chat_id}},
-                    {"$sort": {"importance_score": 1, "timestamp": 1}},
-                    {"$limit": memories_to_remove}
-                ]
+                memory_ids = [mem["fragment_id"] for mem in old_memories]
                 
-                old_memories = list(self.memory_collection.aggregate(pipeline))
-                fragment_ids = [mem["fragment_id"] for mem in old_memories]
+                result = self.memory_collection.delete_many(
+                    {"fragment_id": {"$in": memory_ids}}
+                )
                 
-                result = self.memory_collection.delete_many({
-                    "fragment_id": {"$in": fragment_ids}
-                })
-                
-                logger.info(f"🧹 Cleaned up {result.deleted_count} old memories for chat {chat_id}")
-            
-            # Remove very old memories
-            cutoff_date = datetime.utcnow() - timedelta(days=self.memory_decay_days)
-            old_result = self.memory_collection.delete_many({
-                "chat_id": chat_id,
-                "timestamp": {"$lt": cutoff_date},
-                "importance_score": {"$lt": 0.7}  # Keep important memories longer
-            })
-            
-            if old_result.deleted_count > 0:
-                logger.info(f"🧹 Cleaned up {old_result.deleted_count} expired memories for chat {chat_id}")
+                logger.info(f"✅ Cleaned up {result.deleted_count} old memories for chat {chat_id}")
                 
         except Exception as e:
             logger.error(f"Failed to cleanup memories: {e}")
     
-    async def get_chat_memory_stats(self, chat_id: str) -> Dict:
-        """Get memory statistics for a chat"""
+    def get_memory_stats(self, chat_id: str) -> Dict[str, Any]:
+        """Get statistics about stored memories for a chat"""
         try:
+            # Aggregate memory statistics
             pipeline = [
                 {"$match": {"chat_id": chat_id}},
                 {
@@ -534,25 +586,25 @@ class MemoryEnhancedProcessor:
                 r"my favorite (.+?) is (.+?)(?:\.|$)"
             ]
             
+            question_lower = question.lower()
             for pattern in preference_patterns:
-                matches = re.finditer(pattern, question.lower())
+                matches = re.findall(pattern, question_lower)
                 for match in matches:
-                    preference_text = f"User {match.group(1)} {match.group(2)}"
+                    preference_content = f"User {match[0]}s {match[1]}"
                     await self.memory_manager.store_memory(
                         chat_id=chat_id,
-                        content=preference_text,
+                        content=preference_content,
                         content_type='preference'
                     )
             
             # Store important facts from results
             if result.get('insights'):
                 for insight in result['insights']:
-                    if any(keyword in insight.lower() for keyword in ['increase', 'decrease', 'highest', 'lowest', 'trend']):
-                        await self.memory_manager.store_memory(
-                            chat_id=chat_id,
-                            content=f"Fact: {insight}",
-                            content_type='fact'
-                        )
-                        
+                    await self.memory_manager.store_memory(
+                        chat_id=chat_id,
+                        content=f"Fact: {insight}",
+                        content_type='fact'
+                    )
+                    
         except Exception as e:
             logger.error(f"Failed to extract insights: {e}")
