@@ -10,7 +10,7 @@ from datetime import datetime
 from collections import defaultdict
 
 # Database connection (matches your .env)
-MONGODB_URI = "mongodb://127.0.0.1:27017/genai"
+MONGODB_URI = ""
 
 def analyze_database():
     """Comprehensive analysis of the genai database"""
