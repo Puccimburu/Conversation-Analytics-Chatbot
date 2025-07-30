@@ -10,8 +10,7 @@ from datetime import datetime
 
 # Try different connection possibilities
 POSSIBLE_CONNECTIONS = [
-    "mongodb://127.0.0.1:27017",  # Local MongoDB
-    "mongodb://localhost:27017", 
+    
    
     # Add your cloud connection if you have one
 ]
