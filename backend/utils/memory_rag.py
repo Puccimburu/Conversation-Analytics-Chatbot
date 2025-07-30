@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict
 import pymongo
 from bson import ObjectId
 import hashlib
-from config import DATABASE_SCHEMA  # Import GenAI schema
+from config.config import DATABASE_SCHEMA  # Import GenAI schema
 
 logger = logging.getLogger(__name__)
 

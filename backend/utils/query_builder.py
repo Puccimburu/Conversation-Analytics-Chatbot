@@ -3,7 +3,7 @@ import re
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
-from config import DATABASE_SCHEMA, CHART_TYPE_MAPPING
+from config.config import DATABASE_SCHEMA, CHART_TYPE_MAPPING
 
 logger = logging.getLogger(__name__)
 

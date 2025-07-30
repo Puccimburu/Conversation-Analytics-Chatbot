@@ -9,7 +9,7 @@ import json
 import re
 import asyncio
 from typing import List, Dict, Any, Optional
-from config import DATABASE_SCHEMA  # Import GenAI schema
+from config.config import DATABASE_SCHEMA  # Import GenAI schema
 
 logger = logging.getLogger(__name__)
 

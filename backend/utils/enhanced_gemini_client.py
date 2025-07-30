@@ -7,6 +7,7 @@ import re
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+from config.config import DATABASE_SCHEMA  # Import the GenAI schema
 
 logger = logging.getLogger(__name__)
 
@@ -54,16 +55,21 @@ class BulletproofGeminiClient:
         self.required_query_fields = ['collection', 'pipeline', 'chart_hint', 'query_intent']
         self.required_viz_fields = ['chart_type', 'chart_config', 'summary', 'insights']
         
+        # Load GenAI schema dynamically
+        self.genai_schema = DATABASE_SCHEMA.copy()
+        self.genai_collections = list(self.genai_schema.get('collections', {}).keys())
+        
         # Test connection
         try:
             test_response = self.model.generate_content("Test connection")
             self.available = True
             logger.info("✅ Enhanced Gemini client initialized and tested")
+            logger.info(f"🎯 Configured for GenAI database with {len(self.genai_collections)} collections")
         except Exception as e:
             logger.error(f"❌ Gemini test failed: {e}")
             self.available = False
         
-    async def generate_query_with_retry(self, user_question: str, schema_info: Dict, 
+    async def generate_query_with_retry(self, user_question: str, schema_info: Dict = None, 
                                       max_retries: int = 5) -> GeminiResponse:
         """
         Stage 1: Generate MongoDB query with bulletproof retry logic
@@ -77,7 +83,9 @@ class BulletproofGeminiClient:
                 stage=QueryStage.QUERY_GENERATION
             )
         
-        prompt = self._build_query_prompt(user_question, schema_info)
+        # Use provided schema or default to GenAI schema
+        schema = schema_info or self.genai_schema
+        prompt = self._build_query_prompt(user_question, schema)
         
         for attempt in range(max_retries):
             try:
@@ -101,7 +109,7 @@ class BulletproofGeminiClient:
                 if not self._validate_query_response(query_data):
                     raise ValueError("Response missing required fields")
                 
-                logger.info("✅ Successfully generated query")
+                logger.info(f"✅ Successfully generated query for collection: {query_data.get('collection')}")
                 return GeminiResponse(
                     success=True,
                     data=query_data,
@@ -163,7 +171,7 @@ class BulletproofGeminiClient:
                 if not self._validate_visualization_response(viz_data):
                     raise ValueError("Response missing required fields")
                 
-                logger.info("✅ Successfully generated visualization")
+                logger.info(f"✅ Successfully generated visualization: {viz_data.get('chart_type')}")
                 return GeminiResponse(
                     success=True,
                     data=viz_data,
@@ -248,21 +256,65 @@ class BulletproofGeminiClient:
         Build enhanced prompt for Stage 1 - Query Generation
         Optimized for GenAI operations and document intelligence domain
         """
+        # Get collection names from schema - prioritize key GenAI collections
+        all_collections = list(schema_info.get('collections', {}).keys())
+        
+        # Prioritize key GenAI collections for better prompt focus
+        priority_collections = [
+            'costevalutionforllm', 'documentextractions', 'obligationextractions', 
+            'agent_activity', 'files', 'batches', 'users', 'conversations',
+            'prompts', 'compliances', 'documentmappings', 'llmpricing'
+        ]
+        
+        # Use priority collections that exist in schema
+        available_priority = [col for col in priority_collections if col in all_collections]
+        other_collections = [col for col in all_collections if col not in priority_collections]
+        
+        # Combine for final list (priority first)
+        featured_collections = available_priority[:8] + other_collections[:4]
+        
         return f"""You are an expert MongoDB query architect specializing in AI operations and document intelligence systems.
 
 CRITICAL REQUIREMENTS:
 1. Return ONLY valid JSON - no markdown, no explanations, no extra text
 2. Use exact field names from schema
 3. Create efficient aggregation pipelines with proper sorting and limits
-4. Consider data relationships and business context
+4. Consider data relationships and business context for GenAI operations
 
 DOMAIN: AI Operations & Document Intelligence
 - Focus on AI costs, document processing, compliance tracking, agent performance
+- Analyze operational efficiency, cost optimization, quality metrics
 
-SCHEMA INFORMATION:
-{json.dumps(schema_info, indent=2)}
+AVAILABLE COLLECTIONS: {', '.join(featured_collections)}
 
 USER QUESTION: "{user_question}"
+
+GENAI COLLECTION PURPOSES:
+🤖 AI OPERATIONS & COSTS:
+- costevalutionforllm: AI model costs, token usage, pricing analysis (totalCost, inputTokens, outputTokens, modelType)
+- llmpricing: LLM model pricing tiers and rates (ratePerMillionInputTokens, ratePerMillionOutputTokens, modelVariant)
+- agent_activity: AI agent performance and activity logs (Agent, Outcome, Timestamp)
+
+📄 DOCUMENT PROCESSING:
+- files: Document storage, metadata, processing status (filename, status, size, createdAt)
+- documentextractions: Extracted content, confidence scores (Type, Confidence_Score, Extraction_Text)
+- documenttypes: Document categorization and types
+- documentmappings: Document-to-prompt relationships (mappingId, batchId, fileId)
+- batches: Batch processing jobs and status (batchId, status, createdAt)
+
+⚖️ COMPLIANCE & LEGAL:
+- obligationextractions: Legal obligations extracted from documents (name, Text, Risk_Level)
+- obligationmappings: Obligation-to-document relationships (mappingId, obligationIds)
+- compliances: Compliance tracking and validation
+
+👥 USER & SYSTEM:
+- users: User accounts and profiles (firstName, lastName, email, role, createdAt)
+- allowedusers: Access control and permissions
+- conversations: Chat sessions and interactions (title, userId, createdAt, updatedAt)
+
+🔄 WORKFLOW MANAGEMENT:
+- prompts: AI prompts library and templates (promptName, promptType, promptText)
+- langgraph_checkpoints: Workflow state management
 
 RESPONSE FORMAT (JSON only):
 {{
@@ -314,14 +366,14 @@ For "Which compliance obligations need attention?":
 {{
   "collection": "obligationextractions",
   "pipeline": [
-    {{"$group": {{"_id": "$name", "count": {{"$sum": 1}}}}}},
-    {{"$sort": {{"count": -1}}}},
+    {{"$group": {{"_id": "$name", "count": {{"$sum": 1}}, "high_risk": {{"$sum": {{"$cond": [{{"$eq": ["$Risk_Level", "High"]}}, 1, 0]}}}}}}}},
+    {{"$sort": {{"high_risk": -1, "count": -1}}}},
     {{"$limit": 10}}
   ],
   "chart_hint": "pie",
-  "query_intent": "Show distribution of compliance obligations",
-  "expected_fields": ["_id", "count"],
-  "data_summary": "Count of each obligation type for priority assessment"
+  "query_intent": "Show distribution of compliance obligations with risk focus",
+  "expected_fields": ["_id", "count", "high_risk"],
+  "data_summary": "Count of each obligation type with high-risk indicators"
 }}
 
 For "How are our AI agents performing?":
@@ -329,7 +381,8 @@ For "How are our AI agents performing?":
   "collection": "agent_activity",
   "pipeline": [
     {{"$group": {{"_id": "$Agent", "success_rate": {{"$avg": {{"$cond": [{{"$eq": ["$Outcome", "Success"]}}, 1, 0]}}}}, "total_activities": {{"$sum": 1}}}}}},
-    {{"$sort": {{"success_rate": -1}}}}
+    {{"$sort": {{"success_rate": -1}}}},
+    {{"$limit": 15}}
   ],
   "chart_hint": "bar",
   "query_intent": "Analyze agent performance by success rate",
@@ -337,10 +390,28 @@ For "How are our AI agents performing?":
   "data_summary": "Success rates and activity counts for each agent"
 }}
 
+For "Show me user activity patterns":
+{{
+  "collection": "users",
+  "pipeline": [
+    {{"$group": {{"_id": "$role", "user_count": {{"$sum": 1}}, "avg_creation_date": {{"$avg": "$createdAt"}}}}}},
+    {{"$sort": {{"user_count": -1}}}}
+  ],
+  "chart_hint": "pie",
+  "query_intent": "Analyze user distribution by role",
+  "expected_fields": ["_id", "user_count"],
+  "data_summary": "Count of users by role for system usage analysis"
+}}
+
 CHART TYPE SELECTION:
-- bar: comparisons, rankings, performance metrics
+- bar: comparisons, rankings, performance metrics, cost analysis
 - pie/doughnut: distributions, percentages, breakdowns (≤8 categories)
 - line: trends over time, sequential data, cost tracking
+
+FIELD NAME ACCURACY:
+- Use exact field names from your GenAI database
+- Common fields: totalCost, inputTokens, outputTokens, Confidence_Score, Risk_Level, Outcome
+- Always check field casing and use exact matches
 
 JSON only - no other text:"""
 
@@ -357,6 +428,7 @@ JSON only - no other text:"""
 
 DOMAIN: AI Operations & Document Intelligence
 - Focus on actionable insights for cost optimization, performance improvement, compliance management
+- Emphasize operational efficiency, quality metrics, and business value
 
 USER QUESTION: "{user_question}"
 QUERY CONTEXT: {json.dumps(query_context, indent=2)}
@@ -368,7 +440,7 @@ CRITICAL REQUIREMENTS:
 2. Choose optimal chart type for the data pattern and business context
 3. Create meaningful summaries with specific insights and actionable recommendations
 4. Include complete Chart.js configuration ready for rendering
-5. Focus on business value and operational improvements
+5. Focus on business value and operational improvements for GenAI systems
 
 RESPONSE FORMAT (JSON only):
 {{
@@ -376,10 +448,10 @@ RESPONSE FORMAT (JSON only):
   "chart_config": {{
     "type": "bar",
     "data": {{
-      "labels": ["Model A", "Model B"],
+      "labels": ["GPT-4", "GPT-3.5", "Gemini"],
       "datasets": [{{
         "label": "AI Costs ($)",
-        "data": [1247.50, 892.30],
+        "data": [1247.50, 892.30, 654.20],
         "backgroundColor": ["#3B82F6", "#EF4444", "#10B981", "#F59E0B"],
         "borderColor": "#1E40AF",
         "borderWidth": 2
@@ -397,24 +469,36 @@ RESPONSE FORMAT (JSON only):
       }}
     }}
   }},
-  "summary": "Comprehensive 2-3 sentence summary with specific numbers, percentages, and business impact",
+  "summary": "Your AI costs total $2,793.00 across 3 models, with GPT-4 representing 45% of spending at $1,247.50 despite processing fewer requests than GPT-3.5.",
   "insights": [
-    "Key insight 1 with specific data points and operational significance",
-    "Key insight 2 with actionable information for decision making",
-    "Key insight 3 highlighting trends, anomalies, or optimization opportunities"
+    "GPT-4 generates 40% higher costs per token but delivers 95% confidence scores vs 87% for GPT-3.5",
+    "Gemini processes 60% more documents but costs 48% less than GPT-4, indicating strong efficiency",
+    "Cost per successful extraction: GPT-4 ($0.12), GPT-3.5 ($0.08), Gemini ($0.05)"
   ],
   "recommendations": [
-    "Actionable recommendation for cost optimization or performance improvement",
-    "Strategic suggestion based on the data patterns observed"
+    "Consider routing routine document processing to Gemini to reduce costs by 58%",
+    "Reserve GPT-4 for high-value extractions requiring >90% confidence scores"
   ]
 }}
 
-GENAI DOMAIN CONTEXT:
-- AI Cost Analysis: Focus on ROI, cost per token, model efficiency
-- Document Processing: Emphasize accuracy, confidence, processing speed
-- Compliance: Highlight risk levels, obligation priorities, coverage gaps
-- Agent Performance: Show success rates, throughput, reliability metrics
-- Operational: Identify bottlenecks, optimization opportunities, system health
+GENAI DOMAIN CONTEXT & INSIGHTS:
+- AI Cost Analysis: Focus on ROI, cost per token, model efficiency, operational optimization
+- Document Processing: Emphasize accuracy, confidence, processing speed, quality metrics
+- Compliance: Highlight risk levels, obligation priorities, coverage gaps, regulatory requirements
+- Agent Performance: Show success rates, throughput, reliability metrics, operational health
+- User Analytics: Track engagement, productivity, system utilization, workflow efficiency
+
+BUSINESS-FOCUSED SUMMARIES:
+- Include specific dollar amounts, percentages, and operational metrics
+- Highlight cost savings opportunities and efficiency improvements
+- Emphasize business impact and decision-making insights
+- Use concrete numbers from the data for credibility
+
+ACTIONABLE INSIGHTS:
+- Connect data patterns to operational decisions
+- Identify optimization opportunities and bottlenecks
+- Suggest specific actions based on the analysis
+- Focus on measurable improvements and ROI
 
 CHART TYPE SELECTION GUIDE:
 - Bar: Best for comparisons, rankings, performance metrics, cost analysis
@@ -422,17 +506,18 @@ CHART TYPE SELECTION GUIDE:
 - Pie/Doughnut: Perfect for distributions, breakdowns, resource allocation (≤8 categories)
 
 COLOR SCHEME: Use professional colors that convey business intelligence:
-- Blues (#3B82F6, #1E40AF) for primary metrics
-- Greens (#10B981, #059669) for positive performance/success
-- Reds (#EF4444, #DC2626) for issues/high costs/failures
-- Oranges (#F59E0B, #D97706) for warnings/medium priority
-- Purples (#8B5CF6, #7C3AED) for special categories
+- Blues (#3B82F6, #1E40AF) for primary metrics and positive trends
+- Greens (#10B981, #059669) for positive performance, success, efficiency
+- Reds (#EF4444, #DC2626) for issues, high costs, failures, risks
+- Oranges (#F59E0B, #D97706) for warnings, medium priority, attention needed
+- Purples (#8B5CF6, #7C3AED) for special categories and advanced features
 
 JSON only - no other text:"""
 
     def _validate_query_response(self, data: Dict) -> bool:
         """
         Validate Stage 1 response structure and content
+        Enhanced for GenAI operations
         """
         try:
             # Check required fields
@@ -447,11 +532,16 @@ JSON only - no other text:"""
                 logger.warning("Invalid pipeline structure")
                 return False
             
-            # Validate collection name
+            # Validate collection name - ensure it's a valid GenAI collection
             collection = data.get('collection', '')
             if not isinstance(collection, str) or not collection:
                 logger.warning("Invalid collection name")
                 return False
+            
+            # Check if collection exists in GenAI schema
+            if collection not in self.genai_collections:
+                logger.warning(f"Collection '{collection}' not found in GenAI schema")
+                # Don't fail validation - might be a valid collection not in our schema
             
             # Validate chart hint
             valid_charts = ['bar', 'pie', 'line', 'doughnut']
@@ -459,6 +549,7 @@ JSON only - no other text:"""
                 logger.warning(f"Invalid chart hint: {data.get('chart_hint')}")
                 return False
             
+            logger.info(f"✅ Query validation passed for collection: {collection}")
             return True
             
         except Exception as e:
@@ -468,6 +559,7 @@ JSON only - no other text:"""
     def _validate_visualization_response(self, data: Dict) -> bool:
         """
         Validate Stage 2 response structure and content
+        Enhanced for GenAI operations visualization
         """
         try:
             # Check required fields
@@ -491,18 +583,25 @@ JSON only - no other text:"""
                 logger.warning("Invalid chart data structure")
                 return False
             
+            # Validate datasets
+            datasets = chart_data.get('datasets', [])
+            if not isinstance(datasets, list) or len(datasets) == 0:
+                logger.warning("Missing or invalid datasets")
+                return False
+            
             # Validate insights and recommendations
             insights = data.get('insights', [])
-            recommendations = data.get('recommendations', [])
-            
             if not isinstance(insights, list) or len(insights) == 0:
                 logger.warning("Missing or invalid insights")
                 return False
             
-            if not isinstance(recommendations, list):
-                logger.warning("Invalid recommendations format")
+            # Summary should be substantial
+            summary = data.get('summary', '')
+            if not isinstance(summary, str) or len(summary) < 20:
+                logger.warning("Summary too short or invalid")
                 return False
             
+            logger.info("✅ Visualization validation passed")
             return True
             
         except Exception as e:
@@ -510,7 +609,7 @@ JSON only - no other text:"""
             return False
 
     # Legacy compatibility methods for existing code
-    async def generate_query(self, user_question: str, schema_info: Dict, 
+    async def generate_query(self, user_question: str, schema_info: Dict = None, 
                            context: Dict = None) -> Dict:
         """Legacy compatibility method for generate_query"""
         response = await self.generate_query_with_retry(user_question, schema_info)

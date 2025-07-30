@@ -2,7 +2,7 @@ import google.generativeai as genai
 import json
 import time
 import logging
-from config import Config
+from config.config import Config
 from .query_builder import PromptBuilder, validate_json_response
 
 logger = logging.getLogger(__name__)

@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
-from config import DATABASE_SCHEMA  # Import the new GenAI schema
+from config.config import DATABASE_SCHEMA  # Import the new GenAI schema
 
 logger = logging.getLogger(__name__)
 

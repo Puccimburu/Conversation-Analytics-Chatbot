@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-from config import DATABASE_SCHEMA  # Import the new schema
+from config.config import DATABASE_SCHEMA  # Import the new schema
 
 logger = logging.getLogger(__name__)
 

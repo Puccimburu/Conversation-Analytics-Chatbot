@@ -2,7 +2,7 @@ import pymongo
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 import logging
-from config import Config, DATABASE_SCHEMA
+from config.config import Config, DATABASE_SCHEMA
 
 logger = logging.getLogger(__name__)
 
