@@ -12,7 +12,7 @@ from datetime import datetime
 POSSIBLE_CONNECTIONS = [
     "mongodb://127.0.0.1:27017",  # Local MongoDB
     "mongodb://localhost:27017", 
-    "mongodb+srv://puccimburu:lrcJzcn6tKcz6X2O@conversational-analytic.ugl1wyj.mongodb.net/?retryWrites=true&w=majority&appName=conversational-analytics",  # Alternative local
+   
     # Add your cloud connection if you have one
 ]
 
