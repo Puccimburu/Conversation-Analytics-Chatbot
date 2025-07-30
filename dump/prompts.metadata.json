@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"promptId":{"$numberInt":"1"}},"name":"promptId_1","background":true,"unique":true}],"uuid":"83e76255baeb41ec833e16073ca00a1e","collectionName":"prompts","type":"collection"}

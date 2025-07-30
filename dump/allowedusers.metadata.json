@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"emailId":{"$numberInt":"1"}},"name":"emailId_1","background":true,"unique":true}],"uuid":"96c0631cce394a84a91d3ec4e4ef0198","collectionName":"allowedusers","type":"collection"}

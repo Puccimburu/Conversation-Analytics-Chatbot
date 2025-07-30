@@ -24,8 +24,9 @@ import {
   Send
 } from 'lucide-react';
 
-const ResponseInterface = ({ query, onClose }) => {
+const ResponseInterface = ({ query, onClose, chatId, existingMessages }) => {
   const [responses, setResponses] = useState([]);
+  const [chatId_internal] = useState(chatId); 
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStep, setProcessingStep] = useState('');
   const [followUpQuery, setFollowUpQuery] = useState('');
@@ -36,20 +37,72 @@ const ResponseInterface = ({ query, onClose }) => {
   // FIX: Add ref to track initial query processing
   const hasProcessedInitialQuery = useRef(false);
 
-  // FIX: Modified useEffect to prevent double execution
+  // 🔧 SINGLE INITIALIZATION: Handle both existing messages AND new query
   useEffect(() => {
-    if (query && responses.length === 0 && !hasProcessedInitialQuery.current && !isProcessing) {
-      hasProcessedInitialQuery.current = true;
+    // Prevent double initialization
+    if (hasProcessedInitialQuery.current) {
+      return;
+    }
+    
+    hasProcessedInitialQuery.current = true;
+    
+    // CASE 1: Loading existing chat messages (page reload)
+    if (existingMessages && existingMessages.length > 0) {
+      console.log('📝 Loading existing messages:', existingMessages.length);
+      // Group messages into conversation pairs (user + assistant)
+      const conversationPairs = [];
+      let currentPair = { user: null, assistant: null };
+
+      existingMessages.forEach(msg => {
+        if (!msg || !msg.content) return; // Skip invalid messages
+        
+        if (msg.type === 'user') {
+          // Start new conversation pair
+          if (currentPair.user || currentPair.assistant) {
+            conversationPairs.push(currentPair);
+          }
+          currentPair = { user: msg, assistant: null };
+        } else if (msg.type === 'assistant') {
+          // Complete current pair
+          currentPair.assistant = msg;
+        }
+      });
+
+      // Add the last pair if it exists
+      if (currentPair.user || currentPair.assistant) {
+        conversationPairs.push(currentPair);
+      }
+
+      // Convert pairs to response format
+      const formattedResponses = conversationPairs
+        .filter(pair => pair.user) // Only include pairs with user queries
+        .map((pair, index) => ({
+          id: pair.assistant?.message_id || pair.user?.message_id || `existing_${index}`,
+          query: pair.user?.content || 'Previous query',
+          timestamp: new Date(pair.user?.timestamp || Date.now()).getTime(),
+          answer: pair.assistant?.content || 'Processing...', 
+          chartData: pair.assistant?.chart_data || null,
+          validation: pair.assistant?.validation || null,
+          activeTab: 'answer'
+        }));
+      setResponses(formattedResponses);
+      console.log('✅ Loaded', formattedResponses.length, 'existing messages');
+      return; // IMPORTANT: Return here to prevent processing new query
+    }
+    
+    // CASE 2: New chat with initial query
+    if (query && query.trim()) {
+      console.log('🔄 Processing new query:', query);
       processQuery(query);
     }
-  }, [query]);
+  }, [query, existingMessages]);
 
-  // FIX: Reset the ref when query changes
+  // Reset flag when chat changes
   useEffect(() => {
-    if (query) {
+    return () => {
       hasProcessedInitialQuery.current = false;
-    }
-  }, [query]);
+    };
+  }, [chatId]);
 
   // Auto-scroll to bottom when new content appears
   useEffect(() => {
@@ -58,6 +111,9 @@ const ResponseInterface = ({ query, onClose }) => {
     }
   }, [responses, isProcessing]);
 
+  
+  
+  
   const processQuery = async (queryText, isFollowUp = false, responseIdToReplace = null) => {
     // FIX: Add early return if already processing
     if (isProcessing && !responseIdToReplace) {
@@ -89,7 +145,10 @@ const ResponseInterface = ({ query, onClose }) => {
       const backendResponse = await fetch('http://localhost:5000/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: queryText })
+        body: JSON.stringify({ 
+          question: queryText,
+          chat_id: chatId_internal 
+        })  
       });
 
       let responseData;
@@ -152,7 +211,9 @@ const ResponseInterface = ({ query, onClose }) => {
           { type: 'completeness', passed: true, message: 'Response generated successfully' }
         ]
       },
-      queryId: backendData.query_id || `query_${Date.now()}`
+      queryId: backendData.query_id || `query_${Date.now()}`,
+      // 🚀 NEW: Pass through smart suggestions from backend
+      suggested_questions: backendData.suggested_questions || null
     };
   };
 
@@ -1009,26 +1070,44 @@ This response maintains compatibility with your existing backend infrastructure.
             </div>
             
             {/* Suggested follow-up questions */}
+            {/* Suggested follow-up questions */}
             <div className="mt-6">
               <p className="text-sm text-gray-600 mb-4 font-medium">Suggested follow-ups:</p>
               <div className="flex flex-wrap gap-3">
-                {[
-                  'Show this as a different chart type',
-                  'What are the monthly trends?',
-                  'How does this compare to last year?',
-                  'Show me the top 10 results',
-                  'Break this down by region',
-                  'Analyze the seasonal patterns'
-                ].map((suggestion, index) => (
-                  <button
-                    key={index}
-                    className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors font-medium"
-                    onClick={() => setFollowUpQuery(suggestion)}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
+                {(() => {
+                  // 🚀 Get smart suggestions from latest response or use defaults
+                  const latestResponse = responses[responses.length - 1];
+                  const smartSuggestions = latestResponse?.suggested_questions || [
+                    'Show this as a different chart type',
+                    'What are the monthly trends?',
+                    'How does this compare to last year?',
+                    'Show me the top 10 results',
+                    'Break this down by region',
+                    'Analyze the seasonal patterns'
+                  ];
+                  
+                  return smartSuggestions.slice(0, 6).map((suggestion, index) => (
+                    <button
+                      key={index}
+                      className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors font-medium"
+                      onClick={() => setFollowUpQuery(suggestion)}
+                    >
+                      {suggestion}
+                    </button>
+                  ));
+                })()}
               </div>
+              
+              {/* 🎯 OPTIONAL: Add subtle indicator for smart suggestions */}
+              {(() => {
+                const latestResponse = responses[responses.length - 1];
+                return latestResponse?.suggested_questions && (
+                  <div className="text-xs text-blue-600 mt-2 flex items-center">
+                    <span className="w-2 h-2 bg-blue-600 rounded-full mr-2"></span>
+                    AI-powered suggestions
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}

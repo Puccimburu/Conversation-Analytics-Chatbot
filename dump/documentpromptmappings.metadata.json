@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"sysId":{"$numberInt":"1"}},"name":"sysId_1","background":true,"unique":true}],"uuid":"4ece9f2a047245289b70935481ca51d4","collectionName":"documentpromptmappings","type":"collection"}

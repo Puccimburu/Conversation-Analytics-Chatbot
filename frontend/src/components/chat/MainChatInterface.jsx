@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useChatContext } from '../../context/ChatContext'; 
 import { useNavigate } from 'react-router-dom';
+import chatAPI from '../../services/chatApi'; // 🎯 NEW: Import chat API
 import { 
   Search, 
   Image, 
@@ -19,16 +20,14 @@ import {
   TrendingUp,
   DollarSign
 } from 'lucide-react';
-import ResponseInterface from './ResponseInterface';
 
 const MainChatInterface = () => {
   const { addNewChat } = useChatContext();
   const navigate = useNavigate(); 
   const [query, setQuery] = useState('');
   const [isActive, setIsActive] = useState(false);
-  const [showResponse, setShowResponse] = useState(false);
-  const [submittedQuery, setSubmittedQuery] = useState('');
   const [backendHealth, setBackendHealth] = useState(null);
+  const [isCreatingChat, setIsCreatingChat] = useState(false); // 🎯 NEW: Track chat creation
 
   // Check backend health on component mount
   useEffect(() => {
@@ -80,17 +79,79 @@ const MainChatInterface = () => {
     }
   ];
 
+  // 🎯 UPDATED: Enhanced handleSubmit with chat creation and navigation
   const handleSubmit = async () => {
-    if (query.trim()) {
-      // Create new chat when user submits
-      const chatId = addNewChat({
-        title: query.length > 50 ? query.substring(0, 50) + '...' : query,
-        category: determineCategory(query),
-        priority: 'medium'
-      });
+    if (query.trim() && !isCreatingChat) {
+      setIsCreatingChat(true);
       
-      setSubmittedQuery(query);
-      setShowResponse(true);
+      try {
+        // 🎯 NEW: Create chat session in backend first
+        const response = await chatAPI.createChat({
+          title: query.length > 50 ? query.substring(0, 50) + '...' : query,
+          category: determineCategory(query),
+          priority: 'medium',
+          first_message: query.trim()
+        });
+
+        if (response.success && response.chat_id) {
+          console.log('✅ Chat created successfully:', response.chat_id);
+          
+          // 🎯 NEW: Add to local context for immediate UI update
+          addNewChat({
+            id: response.chat_id,
+            title: query.length > 50 ? query.substring(0, 50) + '...' : query,
+            category: determineCategory(query),
+            priority: 'medium',
+            lastMessage: 'just now',
+            messageCount: 1,
+            unreadCount: 0,
+            lastActivity: Date.now(),
+            status: 'active',
+            isLive: true,
+            participants: 1
+          });
+
+          // 🎯 NEW: Navigate to individual chat page with query
+          navigate(`/chat/${response.chat_id}`, { 
+            state: { 
+              query: query.trim(),
+              isNewChat: true 
+            } 
+          });
+          
+        } else {
+          throw new Error('Failed to create chat session');
+        }
+        
+      } catch (error) {
+        console.error('Error creating chat:', error);
+        
+        // 🎯 FALLBACK: Create local chat if backend fails
+        const fallbackChatId = `chat_${Date.now()}`;
+        addNewChat({
+          id: fallbackChatId,
+          title: query.length > 50 ? query.substring(0, 50) + '...' : query,
+          category: determineCategory(query),
+          priority: 'medium',
+          lastMessage: 'just now',
+          messageCount: 1,
+          unreadCount: 0,
+          lastActivity: Date.now(),
+          status: 'active',
+          isLive: true,
+          participants: 1
+        });
+
+        // Navigate to fallback chat
+        navigate(`/chat/${fallbackChatId}`, { 
+          state: { 
+            query: query.trim(),
+            isNewChat: true 
+          } 
+        });
+      } finally {
+        setIsCreatingChat(false);
+      }
     }
   };
 
@@ -129,23 +190,6 @@ const MainChatInterface = () => {
     setIsActive(true);
   };
 
-  const handleBackToSearch = () => {
-    setShowResponse(false);
-    setQuery('');
-    setSubmittedQuery('');
-    setIsActive(false);
-  };
-
-  // If showing response, render the ResponseInterface
-  if (showResponse) {
-    return (
-      <ResponseInterface 
-        query={submittedQuery} 
-        onClose={handleBackToSearch}
-      />
-    );
-  }
-
   // Quick examples for different chart types
   const quickExamples = [
     {
@@ -180,7 +224,7 @@ const MainChatInterface = () => {
     }
   ];
 
-  // Main search interface
+  // Main search interface with original UI design
   return (
     <div className="flex-1 min-h-screen bg-white flex items-center justify-center p-8">
       <div className="w-full max-w-4xl">
@@ -215,6 +259,16 @@ const MainChatInterface = () => {
           </p>
         </div>
 
+        {/* Loading State */}
+        {isCreatingChat && (
+          <div className="text-center mb-8">
+            <div className="flex items-center justify-center space-x-3 text-gray-600">
+              <div className="w-6 h-6 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
+              <span>Creating your conversation...</span>
+            </div>
+          </div>
+        )}
+
         {/* Main Search Input */}
         <div className="mb-8">
           <div className="relative">
@@ -234,22 +288,30 @@ const MainChatInterface = () => {
                 onBlur={() => setTimeout(() => setIsActive(false), 100)}
                 onKeyPress={handleKeyPress}
                 placeholder="Ask about your sales data, request charts, or analyze trends..."
-                className="w-full px-4 py-4 text-gray-900 placeholder-gray-500 bg-transparent border-0 rounded-xl focus:outline-none focus:ring-0 pr-16"
+                disabled={isCreatingChat}
+                className={`
+                  w-full px-4 py-4 text-gray-900 placeholder-gray-500 bg-transparent border-0 rounded-xl focus:outline-none focus:ring-0 pr-16
+                  ${isCreatingChat ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
               />
               
               {/* Send Button */}
               <button
                 onClick={handleSubmit}
-                disabled={!query.trim()}
+                disabled={!query.trim() || isCreatingChat}
                 className={`
                   absolute right-3 top-1/2 transform -translate-y-1/2 p-2 rounded-lg transition-all duration-200
-                  ${query.trim() 
+                  ${query.trim() && !isCreatingChat
                     ? 'bg-teal-600 text-white hover:bg-teal-700 shadow-sm' 
                     : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   }
                 `}
               >
-                <Send className="w-4 h-4" />
+                {isCreatingChat ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
               </button>
             </div>
 
@@ -260,18 +322,21 @@ const MainChatInterface = () => {
                 <button 
                   className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
                   title="Search"
+                  disabled={isCreatingChat}
                 >
                   <Search className="w-4 h-4" />
                 </button>
                 <button 
                   className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
                   title="Attach Image"
+                  disabled={isCreatingChat}
                 >
                   <Image className="w-4 h-4" />
                 </button>
                 <button 
                   className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
                   title="Location"
+                  disabled={isCreatingChat}
                 >
                   <MapPin className="w-4 h-4" />
                 </button>
@@ -282,12 +347,14 @@ const MainChatInterface = () => {
                 <button 
                   className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
                   title="Attach File"
+                  disabled={isCreatingChat}
                 >
                   <Paperclip className="w-4 h-4" />
                 </button>
                 <button 
                   className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
                   title="Voice Input"
+                  disabled={isCreatingChat}
                 >
                   <Mic className="w-4 h-4" />
                 </button>
@@ -311,9 +378,10 @@ const MainChatInterface = () => {
               <button
                 key={index}
                 onClick={() => handleSuggestedActionClick(action)}
+                disabled={isCreatingChat}
                 className={`
                   flex items-center space-x-2 px-4 py-2 rounded-full border transition-all duration-200 hover:shadow-sm
-                  ${action.color}
+                  ${action.color} ${isCreatingChat ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
                 title={action.example}
               >
@@ -339,7 +407,14 @@ const MainChatInterface = () => {
                     <button
                       key={exampleIndex}
                       onClick={() => setQuery(exampleText)}
-                      className="block w-full text-left text-xs text-gray-600 hover:text-gray-900 hover:bg-white p-2 rounded transition-colors"
+                      disabled={isCreatingChat}
+                      className={`
+                        block w-full text-left text-xs text-gray-600 p-2 rounded transition-colors
+                        ${isCreatingChat 
+                          ? 'opacity-50 cursor-not-allowed'
+                          : 'hover:text-gray-900 hover:bg-white'
+                        }
+                      `}
                     >
                       "{exampleText}"
                     </button>
