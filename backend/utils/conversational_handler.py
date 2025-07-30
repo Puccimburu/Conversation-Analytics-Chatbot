@@ -1,15 +1,16 @@
 # backend/utils/conversational_handler.py
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
+from config import DATABASE_SCHEMA  # Import the new GenAI schema
 
 logger = logging.getLogger(__name__)
 
 class ConversationalHandler:
     """
     Handles conversational queries like greetings, system information, and general help.
-    Generates dynamic responses based on the available dataset.
+    Enhanced for GenAI operations and document intelligence domain.
     """
     
     def __init__(self, database_manager, gemini_client):
@@ -18,28 +19,23 @@ class ConversationalHandler:
         self.schema_info = self._get_schema_info()
     
     def _get_schema_info(self) -> Dict:
-        """Get database schema information"""
+        """Get GenAI database schema information from config"""
         return {
-            "collections": {
-                "sales": {
-                    "description": "Sales transaction records",
-                    "fields": ["order_id", "customer_id", "product_id", "product_name", 
-                              "category", "quantity", "unit_price", "total_amount", 
-                              "discount", "date", "month", "quarter", "sales_rep", "region"],
-                    "sample_categories": ["Laptops", "Smartphones", "Audio", "Tablets", "Accessories", "Monitors"],
-                    "sample_regions": ["North America", "Europe", "Asia-Pacific"]
-                },
-                "products": {
-                    "description": "Product catalog and inventory",
-                    "fields": ["product_id", "name", "category", "brand", "price", 
-                              "cost", "stock", "rating", "reviews_count"]
-                },
-                "customers": {
-                    "description": "Customer information and profiles",
-                    "fields": ["customer_id", "name", "email", "age", "gender", 
-                              "country", "state", "city", "customer_segment", 
-                              "total_spent", "order_count"]
-                }
+            "collections": DATABASE_SCHEMA["collections"],
+            "domain": "AI Operations & Document Intelligence",
+            "primary_collections": [
+                "costevalutionforllm", "documentextractions", "obligationextractions",
+                "agent_activity", "batches", "users", "conversations"
+            ],
+            "sample_analysis_types": [
+                "AI cost tracking", "document processing metrics", "compliance analysis",
+                "agent performance", "user activity", "operational efficiency"
+            ],
+            "sample_data_points": {
+                "ai_operations": ["AI spending", "token usage", "model performance"],
+                "document_processing": ["extraction confidence", "processing times", "success rates"],
+                "compliance": ["legal obligations", "risk assessment", "regulatory tracking"],
+                "operational": ["batch efficiency", "user productivity", "system health"]
             }
         }
     
@@ -95,98 +91,234 @@ class ConversationalHandler:
     
     async def generate_dynamic_stats(self) -> Dict:
         """
-        Generate dynamic statistics from the database for conversational responses.
+        Generate dynamic statistics from the GenAI database for conversational responses.
         """
-        try:
-            if not self.db_manager.is_connected():
-                return {}
-            
-            db = self.db_manager.get_database()
-            
-            # Get basic counts
-            stats = {
-                "total_sales": await self._safe_count(db.sales),
-                "total_customers": await self._safe_count(db.customers),
-                "total_products": await self._safe_count(db.products),
-                "date_range": await self._get_date_range(db.sales),
-                "top_categories": await self._get_top_categories(db.sales),
-                "regions": await self._get_regions(db.sales),
-                "total_revenue": await self._get_total_revenue(db.sales)
-            }
-            
+        stats = {}
+        
+        if not self.db_manager.is_connected():
             return stats
+        
+        try:
+            # Get AI Operations statistics
+            stats.update(await self._get_ai_operations_stats())
+            
+            # Get Document Processing statistics  
+            stats.update(await self._get_document_processing_stats())
+            
+            # Get User Activity statistics
+            stats.update(await self._get_user_activity_stats())
+            
+            # Get System Health statistics
+            stats.update(await self._get_system_health_stats())
+            
         except Exception as e:
-            logger.error(f"Error generating stats: {e}")
-            return {}
+            logger.warning(f"Could not generate dynamic stats: {str(e)}")
+            stats = {"status": "limited_data"}
+        
+        return stats
     
-    async def _safe_count(self, collection) -> int:
-        """Safely count documents in a collection"""
+    async def _get_ai_operations_stats(self) -> Dict:
+        """Get AI operations and cost statistics"""
+        stats = {}
+        
         try:
-            return collection.count_documents({})
-        except:
-            return 0
+            # Cost evaluation stats
+            cost_collection = self.db_manager.get_collection("costevalutionforllm")
+            if cost_collection:
+                total_costs = await self._get_total_ai_costs(cost_collection)
+                model_count = await self._get_model_count(cost_collection)
+                avg_tokens = await self._get_average_tokens(cost_collection)
+                
+                stats.update({
+                    "total_ai_costs": total_costs,
+                    "models_used": model_count,
+                    "avg_tokens_per_request": avg_tokens
+                })
+            
+            # Agent activity stats
+            agent_collection = self.db_manager.get_collection("agent_activity")
+            if agent_collection:
+                agent_stats = await self._get_agent_performance(agent_collection)
+                stats.update(agent_stats)
+                
+        except Exception as e:
+            logger.warning(f"Could not get AI operations stats: {str(e)}")
+        
+        return stats
     
-    async def _get_date_range(self, sales_collection) -> Dict:
-        """Get the date range of sales data"""
+    async def _get_document_processing_stats(self) -> Dict:
+        """Get document processing statistics"""
+        stats = {}
+        
         try:
-            pipeline = [
-                {"$group": {
-                    "_id": None,
-                    "min_date": {"$min": "$date"},
-                    "max_date": {"$max": "$date"}
-                }}
-            ]
-            result = list(sales_collection.aggregate(pipeline))
-            if result:
-                return {
-                    "start": result[0]["min_date"],
-                    "end": result[0]["max_date"]
-                }
-        except:
-            pass
-        return {}
+            # Document extractions
+            doc_collection = self.db_manager.get_collection("documentextractions")
+            if doc_collection:
+                doc_count = doc_collection.count_documents({})
+                avg_confidence = await self._get_average_confidence(doc_collection)
+                extraction_types = await self._get_extraction_types(doc_collection)
+                
+                stats.update({
+                    "total_documents_processed": doc_count,
+                    "avg_extraction_confidence": avg_confidence,
+                    "extraction_types": extraction_types[:5]  # Top 5
+                })
+            
+            # Batch processing
+            batch_collection = self.db_manager.get_collection("batches")
+            if batch_collection:
+                batch_stats = await self._get_batch_statistics(batch_collection)
+                stats.update(batch_stats)
+                
+            # Compliance/obligations
+            obligation_collection = self.db_manager.get_collection("obligationextractions")
+            if obligation_collection:
+                obligation_count = obligation_collection.count_documents({})
+                stats["total_obligations"] = obligation_count
+                
+        except Exception as e:
+            logger.warning(f"Could not get document processing stats: {str(e)}")
+        
+        return stats
     
-    async def _get_top_categories(self, sales_collection) -> List[str]:
-        """Get top 3 product categories by sales"""
+    async def _get_user_activity_stats(self) -> Dict:
+        """Get user activity statistics"""
+        stats = {}
+        
         try:
-            pipeline = [
-                {"$group": {"_id": "$category", "total": {"$sum": "$total_amount"}}},
-                {"$sort": {"total": -1}},
-                {"$limit": 3}
-            ]
-            result = list(sales_collection.aggregate(pipeline))
-            return [item["_id"] for item in result if item["_id"]]
-        except:
-            return []
+            users_collection = self.db_manager.get_collection("users")
+            if users_collection:
+                user_count = users_collection.count_documents({})
+                stats["total_users"] = user_count
+            
+            conversations_collection = self.db_manager.get_collection("conversations")
+            if conversations_collection:
+                conversation_count = conversations_collection.count_documents({})
+                stats["total_conversations"] = conversation_count
+                
+        except Exception as e:
+            logger.warning(f"Could not get user activity stats: {str(e)}")
+        
+        return stats
     
-    async def _get_regions(self, sales_collection) -> List[str]:
-        """Get active regions"""
+    async def _get_system_health_stats(self) -> Dict:
+        """Get system health statistics"""
+        stats = {}
+        
         try:
-            pipeline = [
-                {"$group": {"_id": "$region"}},
-                {"$sort": {"_id": 1}}
-            ]
-            result = list(sales_collection.aggregate(pipeline))
-            return [item["_id"] for item in result if item["_id"]]
-        except:
-            return []
+            # Get collection counts for system overview
+            collections = self.db_manager.db.list_collection_names()
+            stats["total_collections"] = len(collections)
+            
+            # Calculate recent activity (last 7 days)
+            recent_date = datetime.now() - timedelta(days=7)
+            recent_activity = 0
+            
+            for collection_name in ["documentextractions", "batches", "conversations"]:
+                try:
+                    collection = self.db_manager.get_collection(collection_name)
+                    if collection:
+                        count = collection.count_documents({
+                            "createdAt": {"$gte": recent_date}
+                        })
+                        recent_activity += count
+                except:
+                    continue
+            
+            stats["recent_activity_7d"] = recent_activity
+            
+        except Exception as e:
+            logger.warning(f"Could not get system health stats: {str(e)}")
+        
+        return stats
     
-    async def _get_total_revenue(self, sales_collection) -> float:
-        """Get total revenue"""
+    # Helper methods for statistics gathering
+    async def _get_total_ai_costs(self, collection) -> float:
+        """Get total AI costs"""
         try:
-            pipeline = [
-                {"$group": {"_id": None, "total": {"$sum": "$total_amount"}}}
-            ]
-            result = list(sales_collection.aggregate(pipeline))
-            if result:
+            pipeline = [{"$group": {"_id": None, "total": {"$sum": "$totalCost"}}}]
+            result = list(collection.aggregate(pipeline))
+            if result and result[0]["total"]:
                 return round(result[0]["total"], 2)
         except:
             pass
         return 0.0
     
+    async def _get_model_count(self, collection) -> int:
+        """Get count of different models used"""
+        try:
+            pipeline = [{"$group": {"_id": "$modelType"}}]
+            result = list(collection.aggregate(pipeline))
+            return len(result)
+        except:
+            return 0
+    
+    async def _get_average_tokens(self, collection) -> int:
+        """Get average tokens per request"""
+        try:
+            pipeline = [{"$group": {"_id": None, "avg": {"$avg": {"$add": ["$inputTokens", "$outputTokens"]}}}}]
+            result = list(collection.aggregate(pipeline))
+            if result and result[0]["avg"]:
+                return int(result[0]["avg"])
+        except:
+            return 0
+    
+    async def _get_agent_performance(self, collection) -> Dict:
+        """Get agent performance statistics"""
+        try:
+            total_activities = collection.count_documents({})
+            success_activities = collection.count_documents({"Outcome": "Success"})
+            
+            success_rate = (success_activities / total_activities * 100) if total_activities > 0 else 0
+            
+            return {
+                "total_agent_activities": total_activities,
+                "agent_success_rate": round(success_rate, 1)
+            }
+        except:
+            return {}
+    
+    async def _get_average_confidence(self, collection) -> float:
+        """Get average extraction confidence score"""
+        try:
+            pipeline = [{"$group": {"_id": None, "avg": {"$avg": "$Confidence_Score"}}}]
+            result = list(collection.aggregate(pipeline))
+            if result and result[0]["avg"]:
+                return round(result[0]["avg"], 1)
+        except:
+            return 0.0
+    
+    async def _get_extraction_types(self, collection) -> List[str]:
+        """Get most common extraction types"""
+        try:
+            pipeline = [
+                {"$group": {"_id": "$Type", "count": {"$sum": 1}}},
+                {"$sort": {"count": -1}},
+                {"$limit": 10}
+            ]
+            result = list(collection.aggregate(pipeline))
+            return [item["_id"] for item in result if item["_id"]]
+        except:
+            return []
+    
+    async def _get_batch_statistics(self, collection) -> Dict:
+        """Get batch processing statistics"""
+        try:
+            total_batches = collection.count_documents({})
+            completed_batches = collection.count_documents({"status": "completed"})
+            
+            success_rate = (completed_batches / total_batches * 100) if total_batches > 0 else 0
+            
+            return {
+                "total_batches": total_batches,
+                "batch_success_rate": round(success_rate, 1)
+            }
+        except:
+            return {}
+    
     async def generate_conversational_response(self, query: str) -> Dict:
         """
-        Generate a conversational response based on the query type and dynamic data.
+        Generate a conversational response based on the query type and dynamic GenAI data.
         """
         query_type = self.get_query_type(query)
         stats = await self.generate_dynamic_stats()
@@ -205,34 +337,33 @@ class ConversationalHandler:
             return await self._generate_general_response(query, stats)
     
     async def _generate_greeting_response(self, stats: Dict) -> Dict:
-        """Generate a greeting response with dynamic data context"""
+        """Generate a greeting response with dynamic GenAI data context"""
         
-        # Create dynamic greeting based on available data
+        # Create dynamic greeting based on available AI operations data
         greeting_parts = [
-            "Hello! I'm your conversational analytics assistant.",
-            "I can help you explore and analyze your business data using natural language."
+            "Hello! I'm your AI Operations Analytics assistant.",
+            "I specialize in analyzing AI costs, document processing, and operational intelligence."
         ]
         
         if stats:
             data_summary = []
-            if stats.get('total_sales'):
-                data_summary.append(f"{stats['total_sales']} sales records")
-            if stats.get('total_customers'):
-                data_summary.append(f"{stats['total_customers']} customers")
-            if stats.get('total_products'):
-                data_summary.append(f"{stats['total_products']} products")
+            if stats.get('total_documents_processed'):
+                data_summary.append(f"{stats['total_documents_processed']:,} processed documents")
+            if stats.get('total_users'):
+                data_summary.append(f"{stats['total_users']} active users")
+            if stats.get('total_batches'):
+                data_summary.append(f"{stats['total_batches']} processing batches")
             
             if data_summary:
-                greeting_parts.append(f"I have access to {', '.join(data_summary)} in your database.")
+                greeting_parts.append(f"I have access to {', '.join(data_summary)} in your AI operations database.")
             
-            if stats.get('total_revenue'):
-                greeting_parts.append(f"Your total revenue is ${stats['total_revenue']:,.2f}.")
+            if stats.get('total_ai_costs'):
+                greeting_parts.append(f"Your total AI operational costs are ${stats['total_ai_costs']:,.2f}.")
             
-            if stats.get('top_categories'):
-                categories = ', '.join(stats['top_categories'])
-                greeting_parts.append(f"Your top product categories include {categories}.")
+            if stats.get('avg_extraction_confidence'):
+                greeting_parts.append(f"Your document extraction system maintains {stats['avg_extraction_confidence']}% average confidence.")
         
-        greeting_parts.append("What would you like to know about your data?")
+        greeting_parts.append("What would you like to know about your AI operations?")
         
         return {
             "summary": " ".join(greeting_parts),
@@ -242,31 +373,34 @@ class ConversationalHandler:
         }
     
     async def _generate_capabilities_response(self, stats: Dict) -> Dict:
-        """Generate response about system capabilities"""
+        """Generate response about GenAI system capabilities"""
         
         capabilities = [
-            "I'm an AI-powered conversational analytics assistant that can help you:",
-            "• Analyze sales performance and revenue trends",
-            "• Explore customer behavior and demographics", 
-            "• Review product performance and inventory",
-            "• Compare data across different time periods and regions",
-            "• Generate visualizations (charts and graphs) for your data"
+            "I'm an AI-powered conversational analytics assistant specialized in AI operations that can help you:",
+            "• Analyze AI costs, token usage, and model performance",
+            "• Track document processing metrics and extraction confidence", 
+            "• Monitor compliance obligations and legal risk assessment",
+            "• Review agent performance and operational efficiency",
+            "• Explore user activity and system health metrics",
+            "• Generate visualizations and insights for operational data"
         ]
         
         if stats:
-            capabilities.append(f"\nI'm currently connected to your database with:")
-            if stats.get('total_sales'):
-                capabilities.append(f"• {stats['total_sales']} sales transactions")
-            if stats.get('total_customers'):
-                capabilities.append(f"• {stats['total_customers']} customer records")
-            if stats.get('total_products'):
-                capabilities.append(f"• {stats['total_products']} product entries")
+            capabilities.append(f"\nI'm currently connected to your AI operations database with:")
+            if stats.get('total_documents_processed'):
+                capabilities.append(f"• {stats['total_documents_processed']:,} document processing records")
+            if stats.get('total_ai_costs'):
+                capabilities.append(f"• ${stats['total_ai_costs']:,.2f} in tracked AI operational costs")
+            if stats.get('total_obligations'):
+                capabilities.append(f"• {stats['total_obligations']} compliance obligations monitored")
+            if stats.get('models_used'):
+                capabilities.append(f"• {stats['models_used']} different AI models in use")
             
-            if stats.get('regions'):
-                regions = ', '.join(stats['regions'])
-                capabilities.append(f"• Data across regions: {regions}")
+            if stats.get('extraction_types'):
+                types = ', '.join(stats['extraction_types'][:3])
+                capabilities.append(f"• Document types include: {types}")
         
-        capabilities.append("\nJust ask me questions in natural language, and I'll provide insights with visualizations!")
+        capabilities.append("\nJust ask me questions in natural language about your AI operations, and I'll provide insights with visualizations!")
         
         return {
             "summary": "\n".join(capabilities),
@@ -276,48 +410,38 @@ class ConversationalHandler:
         }
     
     async def _generate_help_response(self, stats: Dict) -> Dict:
-        """Generate help response with dynamic examples"""
+        """Generate help response with GenAI-specific examples"""
         
         help_text = [
-            "Here's how to use the conversational analytics system:",
+            "Here's how to use the AI Operations Analytics system:",
             "",
             "1. **Ask Natural Questions**: Simply type your question in plain English",
-            "2. **Get Insights**: I'll analyze your data and provide summaries",
-            "3. **View Visualizations**: See charts and graphs for better understanding",
+            "2. **Get AI Insights**: I'll analyze your operational data and provide summaries",
+            "3. **View Visualizations**: Charts and graphs will help you understand patterns",
+            "4. **Follow Suggestions**: Use the suggested follow-up questions for deeper analysis",
             "",
-            "**Example Questions You Can Ask:**"
+            "**AI Operations Examples:**",
+            "• 'What's our AI spending this month?'",
+            "• 'Show me document extraction confidence scores'",
+            "• 'Which compliance obligations need attention?'",
+            "• 'How are our AI agents performing?'",
+            "• 'Compare processing costs between document types'",
+            "",
+            "**Advanced Analysis:**",
+            "• 'Show me cost trends over the last 6 months'",
+            "• 'Which users generate the highest AI costs?'",
+            "• 'What's our batch processing success rate?'",
+            "• 'Find documents with low confidence scores'"
         ]
         
-        # Generate dynamic examples based on available data
-        examples = []
-        if stats.get('total_sales'):
-            examples.append("• \"What were our top 5 selling products last month?\"")
-            examples.append("• \"Show me revenue by region\"")
-        
-        if stats.get('total_customers'):
-            examples.append("• \"Which customer segment generates the most profit?\"")
-            examples.append("• \"Show me customer distribution by country\"")
-        
-        if stats.get('top_categories'):
-            examples.extend([
-                f"• \"Compare sales performance between {stats['top_categories'][0]} and {stats['top_categories'][1] if len(stats['top_categories']) > 1 else 'other categories'}\"",
-                "• \"What's the trend in our product categories over time?\""
-            ])
-        
-        if not examples:
-            examples = [
-                "• \"Show me sales performance\"",
-                "• \"What are our top products?\"",
-                "• \"How are customers distributed?\""
-            ]
-        
-        help_text.extend(examples)
-        help_text.append("\n**Tips:**")
-        help_text.extend([
-            "• Be specific about time periods (last month, this quarter, etc.)",
-            "• Ask for comparisons between different categories or regions",
-            "• Request specific chart types if you prefer (bar chart, pie chart, etc.)"
-        ])
+        if stats:
+            help_text.append(f"\n**Your Current Data Overview:**")
+            if stats.get('total_documents_processed'):
+                help_text.append(f"• {stats['total_documents_processed']:,} documents available for analysis")
+            if stats.get('recent_activity_7d'):
+                help_text.append(f"• {stats['recent_activity_7d']} recent activities in the last 7 days")
+            if stats.get('total_collections'):
+                help_text.append(f"• {stats['total_collections']} data collections for comprehensive analysis")
         
         return {
             "summary": "\n".join(help_text),
@@ -327,43 +451,44 @@ class ConversationalHandler:
         }
     
     async def _generate_data_info_response(self, stats: Dict) -> Dict:
-        """Generate response about available data"""
+        """Generate response about available GenAI data"""
         
-        data_info = ["Here's what data I have access to:\n"]
+        data_info = [
+            "Your AI Operations database contains comprehensive operational intelligence data:",
+            "",
+            "**🤖 AI Operations Data:**",
+            "• Cost tracking and token usage analytics",
+            "• Model performance and efficiency metrics",
+            "• Processing time and resource utilization",
+            "",
+            "**📄 Document Intelligence:**",
+            "• Document extraction results and confidence scores",
+            "• Content analysis and classification data",
+            "• Processing batch information and success rates",
+            "",
+            "**⚖️ Compliance & Legal:**",
+            "• Legal obligation extractions and risk assessment",
+            "• Compliance tracking and regulatory monitoring",
+            "• Contract analysis and obligation mapping",
+            "",
+            "**👥 User & System Data:**",
+            "• User activity and engagement metrics",
+            "• System health and performance indicators",
+            "• Conversation history and interaction patterns"
+        ]
         
-        # Dynamic data overview
         if stats:
-            data_info.append("**Dataset Overview:**")
-            if stats.get('total_sales'):
-                data_info.append(f"• Sales Records: {stats['total_sales']} transactions")
-            if stats.get('total_customers'):
-                data_info.append(f"• Customer Data: {stats['total_customers']} customer profiles")
-            if stats.get('total_products'):
-                data_info.append(f"• Product Catalog: {stats['total_products']} products")
-            
-            if stats.get('total_revenue'):
-                data_info.append(f"• Total Revenue: ${stats['total_revenue']:,.2f}")
-            
-            if stats.get('date_range'):
-                date_range = stats['date_range']
-                if date_range.get('start') and date_range.get('end'):
-                    data_info.append(f"• Date Range: {date_range['start']} to {date_range['end']}")
-            
-            if stats.get('top_categories'):
-                categories = ', '.join(stats['top_categories'])
-                data_info.append(f"• Top Categories: {categories}")
-            
-            if stats.get('regions'):
-                regions = ', '.join(stats['regions'])
-                data_info.append(f"• Regions: {regions}")
-        
-        # Static schema information
-        data_info.extend([
-            "\n**Available Data Types:**",
-            "• **Sales Data**: Orders, revenue, products, dates, regions",
-            "• **Customer Data**: Demographics, segments, purchase history",
-            "• **Product Data**: Categories, pricing, inventory, ratings"
-        ])
+            data_info.append(f"\n**Current Data Volume:**")
+            if stats.get('total_documents_processed'):
+                data_info.append(f"• {stats['total_documents_processed']:,} processed documents")
+            if stats.get('total_ai_costs'):
+                data_info.append(f"• ${stats['total_ai_costs']:,.2f} in tracked operational costs")
+            if stats.get('total_users'):
+                data_info.append(f"• {stats['total_users']} active users")
+            if stats.get('total_batches'):
+                data_info.append(f"• {stats['total_batches']} processing batches")
+            if stats.get('total_obligations'):
+                data_info.append(f"• {stats['total_obligations']} compliance obligations")
         
         return {
             "summary": "\n".join(data_info),
@@ -373,54 +498,44 @@ class ConversationalHandler:
         }
     
     async def _generate_examples_response(self, stats: Dict) -> Dict:
-        """Generate response with dynamic examples"""
+        """Generate response with GenAI-specific example questions"""
         
-        examples = ["Here are some questions you can ask based on your data:\n"]
+        examples = [
+            "Here are some example questions you can ask about your AI operations:",
+            "",
+            "**💰 Cost & Performance Analysis:**",
+            "• 'What's our AI spending this month?'",
+            "• 'Which AI models are most cost-effective?'",
+            "• 'Show me token usage patterns by user'",
+            "• 'Compare processing costs between document types'",
+            "",
+            "**📊 Document Processing:**",
+            "• 'How many documents did we process today?'",
+            "• 'What's our extraction success rate?'",
+            "• 'Show me documents with low confidence scores'",
+            "• 'Which document types take longest to process?'",
+            "",
+            "**⚖️ Compliance & Risk:**",
+            "• 'What are our most critical compliance obligations?'",
+            "• 'Show me high-risk legal obligations'",
+            "• 'Which contracts have data confidentiality requirements?'",
+            "• 'Track compliance obligation trends over time'",
+            "",
+            "**🤖 Agent & System Performance:**",
+            "• 'How are our AI agents performing?'",
+            "• 'Show me batch processing success rates'",
+            "• 'Which users are most active in the system?'",
+            "• 'What's our overall system health status?'"
+        ]
         
-        # Dynamic examples based on actual data
-        if stats.get('total_sales'):
-            examples.extend([
-                "**Sales Analysis:**",
-                "• \"What were our top 10 selling products this quarter?\"",
-                "• \"Show me sales performance by month\"",
-                "• \"Which sales representative has the highest revenue?\"",
-                ""
-            ])
-        
-        if stats.get('total_customers'):
-            examples.extend([
-                "**Customer Insights:**",
-                "• \"Show me customer distribution by age group\"",
-                "• \"Which customer segment spends the most?\"",
-                "• \"What's the average order value by region?\"",
-                ""
-            ])
-        
-        if stats.get('top_categories'):
-            categories = stats['top_categories']
-            examples.extend([
-                "**Product Analysis:**",
-                f"• \"Compare sales between {categories[0]} and {categories[1] if len(categories) > 1 else 'other categories'}\"",
-                "• \"What are our lowest-rated products?\"",
-                "• \"Show me inventory levels for each category\"",
-                ""
-            ])
-        
-        if stats.get('regions'):
-            regions = stats['regions']
-            examples.extend([
-                "**Regional Comparisons:**",
-                f"• \"How does {regions[0]} compare to {regions[1] if len(regions) > 1 else 'other regions'} in sales?\"",
-                "• \"Which region has the highest customer satisfaction?\"",
-                ""
-            ])
-        
-        examples.extend([
-            "**Trend Analysis:**",
-            "• \"Show me revenue trend over the last 6 months\"",
-            "• \"What's the seasonal pattern in our sales?\"",
-            "• \"How has customer acquisition changed over time?\""
-        ])
+        if stats:
+            examples.append(f"\n**Personalized Suggestions Based on Your Data:**")
+            if stats.get('avg_extraction_confidence') and stats['avg_extraction_confidence'] < 85:
+                examples.append(f"• 'Why is our extraction confidence at {stats['avg_extraction_confidence']}%?'")
+            if stats.get('total_ai_costs') and stats['total_ai_costs'] > 1000:
+                examples.append(f"• 'Break down our ${stats['total_ai_costs']:,.2f} in AI costs by category'")
+            if stats.get('batch_success_rate') and stats['batch_success_rate'] < 95:
+                examples.append(f"• 'What's causing our {stats['batch_success_rate']}% batch success rate?'")
         
         return {
             "summary": "\n".join(examples),
@@ -430,72 +545,91 @@ class ConversationalHandler:
         }
     
     async def _generate_general_response(self, query: str, stats: Dict) -> Dict:
-        """Generate a general conversational response using AI when available"""
+        """Generate a general response for unclassified queries"""
         
-        # Try to use Gemini for more nuanced responses
-        if self.gemini_client:
-            try:
-                context = f"Database contains {stats.get('total_sales', 0)} sales records, {stats.get('total_customers', 0)} customers, and {stats.get('total_products', 0)} products."
-                
-                prompt = f"""
-                You are a conversational analytics assistant. The user asked: "{query}"
-                
-                Context: {context}
-                
-                Provide a helpful, conversational response that:
-                1. Addresses their question naturally
-                2. Offers assistance with data analysis
-                3. Suggests how they can explore their data
-                4. Keeps it friendly and professional
-                
-                Limit response to 3-4 sentences.
-                """
-                
-                response = await self.gemini_client.generate_content(prompt)
-                return {
-                    "summary": response.text.strip(),
-                    "chart_data": None,
-                    "conversational": True,
-                    "suggestions": self._get_dynamic_suggestions(stats)
-                }
-            except Exception as e:
-                logger.error(f"Error generating AI response: {e}")
+        response = [
+            f"I understand you're asking: '{query}'",
+            "",
+            "I specialize in AI operations analytics and can help you with:",
+            "",
+            "🤖 **AI Cost Analysis** - spending, efficiency, ROI",
+            "📄 **Document Processing** - extraction results, confidence scores",
+            "⚖️ **Compliance Tracking** - legal obligations, risk assessment", 
+            "👥 **User Analytics** - activity patterns, system usage",
+            "📊 **Operational Intelligence** - system health, performance metrics",
+            "",
+            "Try asking more specific questions about your AI operations data!"
+        ]
         
-        # Fallback response
         return {
-            "summary": "I'm here to help you analyze your data! You can ask me questions about sales, customers, products, or any other aspect of your business data. What would you like to explore?",
+            "summary": "\n".join(response),
             "chart_data": None,
             "conversational": True,
             "suggestions": self._get_dynamic_suggestions(stats)
         }
     
     def _get_dynamic_suggestions(self, stats: Dict) -> List[str]:
-        """Generate dynamic suggestions based on available data"""
+        """Generate dynamic suggestions based on GenAI operational data"""
+        suggestions = [
+            "What's our AI spending this month?",
+            "Show me document extraction confidence scores",
+            "Which compliance obligations need attention?",
+            "How are our AI agents performing?"
+        ]
         
+        # Add data-driven suggestions
+        if stats:
+            if stats.get('total_ai_costs', 0) > 500:
+                suggestions.insert(0, "Break down our AI costs by model type")
+            
+            if stats.get('avg_extraction_confidence', 100) < 90:
+                suggestions.insert(1, "Why are our confidence scores low?")
+            
+            if stats.get('recent_activity_7d', 0) > 100:
+                suggestions.append("Show me this week's processing activity")
+            
+            if stats.get('total_obligations', 0) > 50:
+                suggestions.append("What are our highest risk obligations?")
+            
+            if stats.get('agent_success_rate', 100) < 95:
+                suggestions.insert(2, "What's affecting our agent performance?")
+        
+        return suggestions[:5]  # Return top 5 suggestions
+    
+    def _get_genai_context_suggestions(self, stats: Dict) -> List[str]:
+        """Get contextual suggestions based on GenAI data patterns"""
         suggestions = []
         
-        if stats.get('total_sales'):
-            suggestions.append("Show me top selling products")
-            suggestions.append("What's our revenue by region?")
-        
-        if stats.get('total_customers'):
-            suggestions.append("Customer distribution by segment")
-            suggestions.append("Which customers spend the most?")
-        
-        if stats.get('top_categories'):
-            categories = stats['top_categories']
-            if len(categories) >= 2:
-                suggestions.append(f"Compare {categories[0]} vs {categories[1]} sales")
-        
-        if stats.get('date_range'):
-            suggestions.append("Show sales trends over time")
-        
-        # Default suggestions if no dynamic data
-        if not suggestions:
-            suggestions = [
-                "What can you tell me about my data?",
-                "Show me some insights",
-                "Help me get started"
+        if not stats:
+            return [
+                "Show me system overview",
+                "What data do we have available?",
+                "Help me get started with AI analytics"
             ]
         
-        return suggestions[:6]  # Limit to 6 suggestions
+        # Cost-based suggestions
+        if stats.get('total_ai_costs', 0) > 0:
+            suggestions.append("Compare AI costs by time period")
+            if stats.get('models_used', 0) > 1:
+                suggestions.append("Which AI model is most cost-effective?")
+        
+        # Document processing suggestions
+        if stats.get('total_documents_processed', 0) > 0:
+            suggestions.append("Show me document processing trends")
+            if stats.get('avg_extraction_confidence', 100) < 95:
+                suggestions.append("Improve document extraction confidence")
+        
+        # Compliance suggestions
+        if stats.get('total_obligations', 0) > 0:
+            suggestions.append("Review high-priority compliance items")
+            suggestions.append("Track obligation resolution progress")
+        
+        # User activity suggestions
+        if stats.get('total_users', 0) > 1:
+            suggestions.append("Who are our most active users?")
+        
+        # System health suggestions
+        if stats.get('batch_success_rate', 100) < 98:
+            suggestions.append("Investigate batch processing issues")
+        
+        return suggestions[:6]  # Return top 6 contextual suggestions

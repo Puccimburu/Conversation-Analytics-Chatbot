@@ -3,6 +3,7 @@ import json
 import time
 import logging
 import asyncio
+import re
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
@@ -24,6 +25,7 @@ class GeminiResponse:
 class BulletproofGeminiClient:
     """
     Enhanced Gemini client with bulletproof reliability and two-stage processing
+    Optimized for GenAI operations and document intelligence domain
     """
     
     def __init__(self, api_key: str, model_name: str = "gemini-1.5-flash"):
@@ -52,141 +54,156 @@ class BulletproofGeminiClient:
         self.required_query_fields = ['collection', 'pipeline', 'chart_hint', 'query_intent']
         self.required_viz_fields = ['chart_type', 'chart_config', 'summary', 'insights']
         
+        # Test connection
+        try:
+            test_response = self.model.generate_content("Test connection")
+            self.available = True
+            logger.info("✅ Enhanced Gemini client initialized and tested")
+        except Exception as e:
+            logger.error(f"❌ Gemini test failed: {e}")
+            self.available = False
+        
     async def generate_query_with_retry(self, user_question: str, schema_info: Dict, 
                                       max_retries: int = 5) -> GeminiResponse:
         """
         Stage 1: Generate MongoDB query with bulletproof retry logic
+        Enhanced for GenAI operations domain
         """
-        logger.info(f"🔍 Stage 1 - Query Generation: {user_question}")
+        if not self.available:
+            return GeminiResponse(
+                success=False, 
+                data={}, 
+                error="Gemini client not available",
+                stage=QueryStage.QUERY_GENERATION
+            )
         
         prompt = self._build_query_prompt(user_question, schema_info)
         
-        for attempt in range(1, max_retries + 1):
+        for attempt in range(max_retries):
             try:
-                logger.info(f"   Attempt {attempt}/{max_retries}")
+                logger.info(f"🔍 Gemini Stage 1 - Query Generation (attempt {attempt + 1})")
                 
-                response = await self._make_gemini_call(
-                    prompt, 
-                    self.query_config,
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=self.query_config
+                )
+                
+                if not response.text:
+                    raise ValueError("Empty response from Gemini")
+                
+                # Extract and validate JSON
+                query_data = self._extract_json_from_response(response.text)
+                
+                if not query_data:
+                    raise ValueError("Could not extract valid JSON from response")
+                
+                # Validate response structure
+                if not self._validate_query_response(query_data):
+                    raise ValueError("Response missing required fields")
+                
+                logger.info("✅ Successfully generated query")
+                return GeminiResponse(
+                    success=True,
+                    data=query_data,
+                    attempts=attempt + 1,
                     stage=QueryStage.QUERY_GENERATION
                 )
                 
-                if response.success:
-                    # Enhanced validation for query response
-                    if self._validate_query_response(response.data):
-                        logger.info(f"✅ Query generation successful on attempt {attempt}")
-                        response.attempts = attempt
-                        return response
-                    else:
-                        logger.warning(f"   Query validation failed on attempt {attempt}")
-                        
             except Exception as e:
-                logger.warning(f"   Attempt {attempt} failed: {str(e)}")
+                logger.warning(f"Query generation attempt {attempt + 1} failed: {str(e)}")
                 
-                if attempt < max_retries:
-                    # Exponential backoff with jitter
-                    delay = (2 ** attempt) + (attempt * 0.5)
-                    logger.info(f"   Retrying in {delay:.1f} seconds...")
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"❌ Query generation failed after {max_retries} attempts")
+                if attempt == max_retries - 1:
+                    logger.error("All query generation attempts failed")
                     return GeminiResponse(
-                        success=False, 
-                        data={}, 
-                        error=f"Failed after {max_retries} attempts: {str(e)}",
-                        attempts=attempt,
+                        success=False,
+                        data={},
+                        error=f"Query generation failed after {max_retries} attempts: {str(e)}",
+                        attempts=max_retries,
                         stage=QueryStage.QUERY_GENERATION
                     )
-        
-        # Fallback response if all retries failed
-        return self._create_fallback_query_response(user_question)
+                
+                # Wait with exponential backoff
+                await asyncio.sleep(2 ** attempt)
     
     async def generate_visualization_with_retry(self, user_question: str, raw_data: List[Dict], 
-                                              query_context: Dict, max_retries: int = 5) -> GeminiResponse:
+                                              query_context: Dict, max_retries: int = 4) -> GeminiResponse:
         """
-        Stage 2: Generate visualization config with bulletproof retry logic
+        Stage 2: Generate visualization with bulletproof retry logic
+        Enhanced for GenAI operations insights
         """
-        logger.info(f"📊 Stage 2 - Visualization Generation for {len(raw_data)} results")
+        if not self.available:
+            return GeminiResponse(
+                success=False,
+                data={},
+                error="Gemini client not available",
+                stage=QueryStage.VISUALIZATION
+            )
         
         prompt = self._build_visualization_prompt(user_question, raw_data, query_context)
         
-        for attempt in range(1, max_retries + 1):
+        for attempt in range(max_retries):
             try:
-                logger.info(f"   Attempt {attempt}/{max_retries}")
+                logger.info(f"🧠 Gemini Stage 2 - Visualization Generation (attempt {attempt + 1})")
                 
-                response = await self._make_gemini_call(
-                    prompt, 
-                    self.viz_config,
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=self.viz_config
+                )
+                
+                if not response.text:
+                    raise ValueError("Empty response from Gemini")
+                
+                # Extract and validate JSON
+                viz_data = self._extract_json_from_response(response.text)
+                
+                if not viz_data:
+                    raise ValueError("Could not extract valid JSON from response")
+                
+                # Validate response structure
+                if not self._validate_visualization_response(viz_data):
+                    raise ValueError("Response missing required fields")
+                
+                logger.info("✅ Successfully generated visualization")
+                return GeminiResponse(
+                    success=True,
+                    data=viz_data,
+                    attempts=attempt + 1,
                     stage=QueryStage.VISUALIZATION
                 )
                 
-                if response.success:
-                    if self._validate_visualization_response(response.data):
-                        logger.info(f"✅ Visualization generation successful on attempt {attempt}")
-                        response.attempts = attempt
-                        return response
-                    else:
-                        logger.warning(f"   Visualization validation failed on attempt {attempt}")
-                        
             except Exception as e:
-                logger.warning(f"   Attempt {attempt} failed: {str(e)}")
+                logger.warning(f"Visualization generation attempt {attempt + 1} failed: {str(e)}")
                 
-                if attempt < max_retries:
-                    delay = (2 ** attempt) + (attempt * 0.3)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"❌ Visualization generation failed after {max_retries} attempts")
+                if attempt == max_retries - 1:
+                    logger.error("All visualization generation attempts failed")
                     return GeminiResponse(
-                        success=False, 
-                        data={}, 
-                        error=f"Failed after {max_retries} attempts: {str(e)}",
-                        attempts=attempt,
+                        success=False,
+                        data={},
+                        error=f"Visualization generation failed after {max_retries} attempts: {str(e)}",
+                        attempts=max_retries,
                         stage=QueryStage.VISUALIZATION
                     )
-        
-        # Fallback visualization if all retries failed
-        return self._create_fallback_visualization_response(user_question, raw_data)
+                
+                # Wait with exponential backoff
+                await asyncio.sleep(1.5 ** attempt)
     
-    async def _make_gemini_call(self, prompt: str, config: genai.types.GenerationConfig, 
-                              stage: QueryStage) -> GeminiResponse:
+    def _extract_json_from_response(self, response_text: str) -> Optional[Dict]:
         """
-        Make a single Gemini API call with enhanced error handling
+        Bulletproof JSON extraction with multiple fallback methods
         """
-        try:
-            response = self.model.generate_content(prompt, generation_config=config)
-            
-            if not response or not response.text:
-                raise ValueError("Empty response from Gemini")
-            
-            # Extract and parse JSON from response
-            parsed_data = self._extract_json_from_response(response.text, stage)
-            
-            if not parsed_data:
-                raise ValueError("Could not extract valid JSON from response")
-            
-            return GeminiResponse(success=True, data=parsed_data, stage=stage)
-            
-        except Exception as e:
-            logger.warning(f"Gemini call failed: {str(e)}")
-            raise e
-    
-    def _extract_json_from_response(self, response_text: str, stage: QueryStage) -> Optional[Dict]:
-        """
-        Enhanced JSON extraction with multiple fallback methods
-        """
-        import re
+        if not response_text:
+            return None
         
+        # Clean the response text
         cleaned_text = response_text.strip()
         
-        # Method 1: Direct JSON parsing
+        # Method 1: Try direct JSON parsing
         try:
-            result = json.loads(cleaned_text)
-            if isinstance(result, dict):
-                return result
+            return json.loads(cleaned_text)
         except json.JSONDecodeError:
             pass
         
-        # Method 2: Extract from code blocks
+        # Method 2: Remove markdown code blocks
         json_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
         match = re.search(json_pattern, cleaned_text, re.DOTALL)
         if match:
@@ -217,7 +234,7 @@ class BulletproofGeminiClient:
         try:
             # Remove trailing commas
             fixed_text = re.sub(r',(\s*[}\]])', r'\1', cleaned_text)
-            # Fix single quotes to double quotes
+            # Fix single quotes to double quotes for keys
             fixed_text = re.sub(r"'([^']*)':", r'"\1":', fixed_text)
             return json.loads(fixed_text)
         except json.JSONDecodeError:
@@ -229,14 +246,18 @@ class BulletproofGeminiClient:
     def _build_query_prompt(self, user_question: str, schema_info: Dict) -> str:
         """
         Build enhanced prompt for Stage 1 - Query Generation
+        Optimized for GenAI operations and document intelligence domain
         """
-        return f"""You are an expert MongoDB query architect. Convert natural language questions to MongoDB aggregation pipelines.
+        return f"""You are an expert MongoDB query architect specializing in AI operations and document intelligence systems.
 
 CRITICAL REQUIREMENTS:
-1. Return ONLY valid JSON - no markdown, no explanations
+1. Return ONLY valid JSON - no markdown, no explanations, no extra text
 2. Use exact field names from schema
-3. Create efficient aggregation pipelines
-4. Consider data relationships and constraints
+3. Create efficient aggregation pipelines with proper sorting and limits
+4. Consider data relationships and business context
+
+DOMAIN: AI Operations & Document Intelligence
+- Focus on AI costs, document processing, compliance tracking, agent performance
 
 SCHEMA INFORMATION:
 {json.dumps(schema_info, indent=2)}
@@ -258,21 +279,68 @@ RESPONSE FORMAT (JSON only):
   "data_summary": "What the results should contain"
 }}
 
-EXAMPLES:
+GENAI DOMAIN EXAMPLES:
 
-For "Compare smartphone vs laptop sales":
+For "What's our AI spending this month?":
 {{
-  "collection": "sales",
+  "collection": "costevalutionforllm",
   "pipeline": [
-    {{"$match": {{"category": {{"$in": ["Smartphones", "Laptops"]}}}}}},
-    {{"$group": {{"_id": "$category", "total_revenue": {{"$sum": "$total_amount"}}, "total_quantity": {{"$sum": "$quantity"}}}}}},
-    {{"$sort": {{"total_revenue": -1}}}}
+    {{"$match": {{"timestamp": {{"$gte": "2025-07-01T00:00:00.000Z"}}}}}},
+    {{"$group": {{"_id": "$modelType", "total_cost": {{"$sum": "$totalCost"}}, "total_tokens": {{"$sum": {{"$add": ["$inputTokens", "$outputTokens"]}}}}}}}},
+    {{"$sort": {{"total_cost": -1}}}},
+    {{"$limit": 10}}
   ],
   "chart_hint": "bar",
-  "query_intent": "Compare revenue and quantity between smartphone and laptop categories",
-  "expected_fields": ["_id", "total_revenue", "total_quantity"],
-  "data_summary": "Revenue and quantity totals for each category"
+  "query_intent": "Analyze AI spending by model type for current month",
+  "expected_fields": ["_id", "total_cost", "total_tokens"],
+  "data_summary": "Cost and token usage totals for each AI model"
 }}
+
+For "Show me document extraction confidence scores":
+{{
+  "collection": "documentextractions",
+  "pipeline": [
+    {{"$group": {{"_id": "$Type", "avg_confidence": {{"$avg": "$Confidence_Score"}}, "count": {{"$sum": 1}}}}}},
+    {{"$sort": {{"avg_confidence": -1}}}},
+    {{"$limit": 15}}
+  ],
+  "chart_hint": "bar",
+  "query_intent": "Analyze extraction confidence by document type",
+  "expected_fields": ["_id", "avg_confidence", "count"],
+  "data_summary": "Average confidence scores and counts by extraction type"
+}}
+
+For "Which compliance obligations need attention?":
+{{
+  "collection": "obligationextractions",
+  "pipeline": [
+    {{"$group": {{"_id": "$name", "count": {{"$sum": 1}}}}}},
+    {{"$sort": {{"count": -1}}}},
+    {{"$limit": 10}}
+  ],
+  "chart_hint": "pie",
+  "query_intent": "Show distribution of compliance obligations",
+  "expected_fields": ["_id", "count"],
+  "data_summary": "Count of each obligation type for priority assessment"
+}}
+
+For "How are our AI agents performing?":
+{{
+  "collection": "agent_activity",
+  "pipeline": [
+    {{"$group": {{"_id": "$Agent", "success_rate": {{"$avg": {{"$cond": [{{"$eq": ["$Outcome", "Success"]}}, 1, 0]}}}}, "total_activities": {{"$sum": 1}}}}}},
+    {{"$sort": {{"success_rate": -1}}}}
+  ],
+  "chart_hint": "bar",
+  "query_intent": "Analyze agent performance by success rate",
+  "expected_fields": ["_id", "success_rate", "total_activities"],
+  "data_summary": "Success rates and activity counts for each agent"
+}}
+
+CHART TYPE SELECTION:
+- bar: comparisons, rankings, performance metrics
+- pie/doughnut: distributions, percentages, breakdowns (≤8 categories)
+- line: trends over time, sequential data, cost tracking
 
 JSON only - no other text:"""
 
@@ -280,11 +348,15 @@ JSON only - no other text:"""
                                   query_context: Dict) -> str:
         """
         Build enhanced prompt for Stage 2 - Visualization Generation
+        Optimized for GenAI operations insights and business intelligence
         """
         # Sample the data for context (limit to 5 records for prompt efficiency)
         sample_data = raw_data[:5] if raw_data else []
         
-        return f"""You are a data visualization expert. Create Chart.js configurations and insights based on query results.
+        return f"""You are a data visualization expert specializing in AI operations and business intelligence.
+
+DOMAIN: AI Operations & Document Intelligence
+- Focus on actionable insights for cost optimization, performance improvement, compliance management
 
 USER QUESTION: "{user_question}"
 QUERY CONTEXT: {json.dumps(query_context, indent=2)}
@@ -292,10 +364,11 @@ SAMPLE DATA: {json.dumps(sample_data, indent=2)}
 TOTAL RECORDS: {len(raw_data)}
 
 CRITICAL REQUIREMENTS:
-1. Return ONLY valid JSON - no markdown, no explanations
-2. Choose optimal chart type for the data pattern
-3. Create meaningful summaries with specific insights
-4. Include Chart.js configuration ready for rendering
+1. Return ONLY valid JSON - no markdown, no explanations, no extra text
+2. Choose optimal chart type for the data pattern and business context
+3. Create meaningful summaries with specific insights and actionable recommendations
+4. Include complete Chart.js configuration ready for rendering
+5. Focus on business value and operational improvements
 
 RESPONSE FORMAT (JSON only):
 {{
@@ -303,43 +376,57 @@ RESPONSE FORMAT (JSON only):
   "chart_config": {{
     "type": "bar",
     "data": {{
-      "labels": ["label1", "label2"],
+      "labels": ["Model A", "Model B"],
       "datasets": [{{
-        "label": "Dataset Name",
-        "data": [100, 200],
-        "backgroundColor": ["color1", "color2"],
-        "borderColor": ["border1", "border2"],
+        "label": "AI Costs ($)",
+        "data": [1247.50, 892.30],
+        "backgroundColor": ["#3B82F6", "#EF4444", "#10B981", "#F59E0B"],
+        "borderColor": "#1E40AF",
         "borderWidth": 2
       }}]
     }},
     "options": {{
       "responsive": true,
       "plugins": {{
-        "title": {{"display": true, "text": "Chart Title"}},
+        "title": {{"display": true, "text": "AI Operations Analysis"}},
         "legend": {{"display": true}}
       }},
       "scales": {{
-        "y": {{"beginAtZero": true}},
-        "x": {{"display": true}}
+        "y": {{"beginAtZero": true, "title": {{"display": true, "text": "Cost ($)"}}}},
+        "x": {{"title": {{"display": true, "text": "AI Models"}}}}
       }}
     }}
   }},
-  "summary": "Comprehensive 2-3 sentence summary with specific numbers and percentages",
+  "summary": "Comprehensive 2-3 sentence summary with specific numbers, percentages, and business impact",
   "insights": [
-    "Key insight 1 with specific data points",
-    "Key insight 2 with actionable information",
-    "Key insight 3 highlighting trends or anomalies"
+    "Key insight 1 with specific data points and operational significance",
+    "Key insight 2 with actionable information for decision making",
+    "Key insight 3 highlighting trends, anomalies, or optimization opportunities"
   ],
   "recommendations": [
-    "Actionable recommendation based on the data",
-    "Strategic suggestion for improvement"
+    "Actionable recommendation for cost optimization or performance improvement",
+    "Strategic suggestion based on the data patterns observed"
   ]
 }}
 
+GENAI DOMAIN CONTEXT:
+- AI Cost Analysis: Focus on ROI, cost per token, model efficiency
+- Document Processing: Emphasize accuracy, confidence, processing speed
+- Compliance: Highlight risk levels, obligation priorities, coverage gaps
+- Agent Performance: Show success rates, throughput, reliability metrics
+- Operational: Identify bottlenecks, optimization opportunities, system health
+
 CHART TYPE SELECTION GUIDE:
-- Bar: Comparisons, rankings, categorical data
-- Line: Trends over time, sequential data
-- Pie/Doughnut: Parts of whole, distributions (≤8 categories)
+- Bar: Best for comparisons, rankings, performance metrics, cost analysis
+- Line: Ideal for trends over time, cost tracking, performance monitoring
+- Pie/Doughnut: Perfect for distributions, breakdowns, resource allocation (≤8 categories)
+
+COLOR SCHEME: Use professional colors that convey business intelligence:
+- Blues (#3B82F6, #1E40AF) for primary metrics
+- Greens (#10B981, #059669) for positive performance/success
+- Reds (#EF4444, #DC2626) for issues/high costs/failures
+- Oranges (#F59E0B, #D97706) for warnings/medium priority
+- Purples (#8B5CF6, #7C3AED) for special categories
 
 JSON only - no other text:"""
 
@@ -404,131 +491,74 @@ JSON only - no other text:"""
                 logger.warning("Invalid chart data structure")
                 return False
             
+            # Validate insights and recommendations
+            insights = data.get('insights', [])
+            recommendations = data.get('recommendations', [])
+            
+            if not isinstance(insights, list) or len(insights) == 0:
+                logger.warning("Missing or invalid insights")
+                return False
+            
+            if not isinstance(recommendations, list):
+                logger.warning("Invalid recommendations format")
+                return False
+            
             return True
             
         except Exception as e:
             logger.warning(f"Visualization validation error: {e}")
             return False
-    
-    def _create_fallback_query_response(self, user_question: str) -> GeminiResponse:
-        """
-        Create intelligent fallback for Stage 1 when Gemini fails
-        """
-        logger.info("🔄 Creating fallback query response")
+
+    # Legacy compatibility methods for existing code
+    async def generate_query(self, user_question: str, schema_info: Dict, 
+                           context: Dict = None) -> Dict:
+        """Legacy compatibility method for generate_query"""
+        response = await self.generate_query_with_retry(user_question, schema_info)
         
-        question_lower = user_question.lower()
-        
-        # Intelligent pattern matching for fallback
-        if any(word in question_lower for word in ['top', 'best', 'highest']):
-            fallback_data = {
-                "collection": "sales",
-                "pipeline": [
-                    {"$group": {"_id": "$product_name", "total_revenue": {"$sum": "$total_amount"}}},
-                    {"$sort": {"total_revenue": -1}},
-                    {"$limit": 10}
-                ],
-                "chart_hint": "bar",
-                "query_intent": "Find top performing items by revenue",
-                "expected_fields": ["_id", "total_revenue"],
-                "data_summary": "Top performing products by revenue"
-            }
-        elif 'compare' in question_lower and any(word in question_lower for word in ['smartphone', 'laptop']):
-            fallback_data = {
-                "collection": "sales",
-                "pipeline": [
-                    {"$match": {"category": {"$in": ["Smartphones", "Laptops"]}}},
-                    {"$group": {"_id": "$category", "total_revenue": {"$sum": "$total_amount"}}},
-                    {"$sort": {"total_revenue": -1}}
-                ],
-                "chart_hint": "bar",
-                "query_intent": "Compare smartphone and laptop sales performance",
-                "expected_fields": ["_id", "total_revenue"],
-                "data_summary": "Revenue comparison between categories"
+        if response.success:
+            return {
+                "success": True,
+                "query_data": response.data,
+                "attempts": response.attempts
             }
         else:
-            # Generic fallback
-            fallback_data = {
-                "collection": "sales",
-                "pipeline": [
-                    {"$group": {"_id": "$category", "total_revenue": {"$sum": "$total_amount"}}},
-                    {"$sort": {"total_revenue": -1}},
-                    {"$limit": 10}
-                ],
-                "chart_hint": "bar",
-                "query_intent": "General sales analysis by category",
-                "expected_fields": ["_id", "total_revenue"],
-                "data_summary": "Sales performance by category"
+            return {
+                "success": False,
+                "error": response.error,
+                "attempts": response.attempts
             }
-        
-        return GeminiResponse(
-            success=True,
-            data=fallback_data,
-            error="Used intelligent fallback - Gemini unavailable",
-            stage=QueryStage.QUERY_GENERATION
-        )
     
-    def _create_fallback_visualization_response(self, user_question: str, 
-                                              raw_data: List[Dict]) -> GeminiResponse:
-        """
-        Create intelligent fallback for Stage 2 when Gemini fails
-        """
-        logger.info("🔄 Creating fallback visualization response")
+    async def generate_insights(self, user_question: str, query_data: Dict, 
+                              raw_results: List[Dict], context: Dict = None) -> Dict:
+        """Legacy compatibility method for generate_insights"""
+        response = await self.generate_visualization_with_retry(
+            user_question, raw_results, query_data
+        )
         
-        if not raw_data:
-            fallback_data = {
-                "chart_type": "bar",
-                "chart_config": {
-                    "type": "bar",
-                    "data": {"labels": [], "datasets": []},
-                    "options": {"responsive": True}
-                },
-                "summary": "No data found for your query.",
-                "insights": ["No data available to analyze"],
-                "recommendations": ["Try a different question or check data availability"]
+        if response.success:
+            return {
+                "success": True,
+                "visualization": response.data,
+                "attempts": response.attempts
             }
         else:
-            # Create basic visualization from data
-            labels = [str(item.get('_id', 'Unknown')) for item in raw_data[:10]]
-            values = [float(item.get('total_revenue', item.get('total', 0))) for item in raw_data[:10]]
-            
-            fallback_data = {
-                "chart_type": "bar",
-                "chart_config": {
-                    "type": "bar",
-                    "data": {
-                        "labels": labels,
-                        "datasets": [{
-                            "label": "Values",
-                            "data": values,
-                            "backgroundColor": "rgba(59, 130, 246, 0.8)",
-                            "borderColor": "rgba(59, 130, 246, 1)",
-                            "borderWidth": 2
-                        }]
-                    },
-                    "options": {
-                        "responsive": True,
-                        "plugins": {
-                            "title": {"display": True, "text": "Analysis Results"},
-                            "legend": {"display": False}
-                        },
-                        "scales": {
-                            "y": {"beginAtZero": True},
-                            "x": {"display": True}
-                        }
-                    }
-                },
-                "summary": f"Found {len(raw_data)} results for your query. Analysis shows data across {len(labels)} categories with values ranging from {min(values):.2f} to {max(values):.2f}.",
-                "insights": [
-                    f"Total of {len(raw_data)} records analyzed",
-                    f"Highest value: {max(values):.2f}" if values else "No numeric data available",
-                    "Fallback visualization generated due to AI unavailability"
-                ],
-                "recommendations": ["Enable full AI features for enhanced analysis"]
+            return {
+                "success": False,
+                "error": response.error,
+                "attempts": response.attempts
             }
-        
-        return GeminiResponse(
-            success=True,
-            data=fallback_data,
-            error="Used intelligent fallback - Gemini unavailable",
-            stage=QueryStage.VISUALIZATION
-        )
+
+# Factory function for creating the client
+def create_gemini_client(api_key: str) -> BulletproofGeminiClient:
+    """Factory function to create a BulletproofGeminiClient instance"""
+    return BulletproofGeminiClient(api_key)
+
+# Utility function for testing the client
+async def test_gemini_client(api_key: str) -> bool:
+    """Test if the Gemini client can be initialized and is working"""
+    try:
+        client = BulletproofGeminiClient(api_key)
+        return client.available
+    except Exception as e:
+        logger.error(f"Failed to test Gemini client: {e}")
+        return False

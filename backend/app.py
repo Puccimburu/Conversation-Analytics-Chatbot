@@ -26,13 +26,13 @@ CORS(app)
 
 # Configuration
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://127.0.0.1:27017/analytics_db')
+MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://127.0.0.1:27017/genai')
 
 print("=" * 60)
-print("🚀 PERFECTED AI ANALYTICS - BULLETPROOF GEMINI TWO-STAGE + CHAT")
+print("PERFECTED AI ANALYTICS - BULLETPROOF GEMINI TWO-STAGE + CHAT")
 print("=" * 60)
-print(f"📊 Database: {MONGODB_URI}")
-print(f"🔑 API Key Present: {'Yes' if GOOGLE_API_KEY else 'No'}")
+print(f"Database: {MONGODB_URI}")
+print(f"API Key Present: {'Yes' if GOOGLE_API_KEY else 'No'}")
 print("=" * 60)
 
 # Database Connection
@@ -41,14 +41,14 @@ mongodb_available = False
 
 try:
     client = pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
-    db = client.analytics_db
+    db = client.genai
     client.admin.command('ping')
     mongodb_available = True
-    logger.info("✅ MongoDB connected successfully")
-    print("✅ MongoDB connected successfully")
+    logger.info("MongoDB connected successfully to GenAI database")
+    print("MongoDB connected successfully to GenAI database")
 except Exception as e:
-    logger.error(f"❌ Failed to connect to MongoDB: {e}")
-    print(f"❌ MongoDB Error: {e}")
+    logger.error(f"Failed to connect to MongoDB: {e}")
+    print(f"MongoDB Error: {e}")
     mongodb_available = False
 
 # ============================================================================
@@ -433,7 +433,7 @@ CRITICAL REQUIREMENTS:
 
 RESPONSE FORMAT (JSON only):
 {{
-  "collection": "sales|products|customers|marketing_campaigns",
+  "collection": "costevalutionforllm|documentextractions|obligationextractions|agent_activity",
   "pipeline": [
     {{"$match": {{"condition": "value"}}}},
     {{"$group": {{"_id": "$field", "metric": {{"$sum": "$value"}}}}}},
@@ -621,7 +621,7 @@ JSON only:"""
             
             # Fix missing fields
             if 'collection' not in data:
-                data['collection'] = 'sales'  # Default
+                data['collection'] = 'costevalutionforllm'  # Default
             
             if 'pipeline' not in data:
                 return False  # Can't fix missing pipeline
@@ -762,21 +762,21 @@ class CompleteSimpleQueryProcessor:
         question_lower = user_question.lower()
         
         try:
-            # Smartphone vs Laptop comparison
-            if ("smartphone" in question_lower and "laptop" in question_lower) or ("compare" in question_lower and any(cat in question_lower for cat in ["smartphone", "laptop"])):
-                return self._smartphone_laptop_comparison()
+            # AI cost analysis
+            if any(word in question_lower for word in ["cost", "spending", "ai cost", "model cost"]) or ("compare" in question_lower and any(word in question_lower for word in ["ai", "model", "cost"])):
+                return self._ai_cost_analysis()
             
-            # Top products queries
-            elif any(word in question_lower for word in ["top", "best", "highest"]) and any(word in question_lower for word in ["product", "selling", "performer"]):
-                return self._top_products()
+            # Document confidence analysis
+            elif any(word in question_lower for word in ["confidence", "document", "extraction"]) and any(word in question_lower for word in ["top", "best", "analysis"]):
+                return self._document_confidence_analysis()
             
-            # Revenue by category
-            elif any(word in question_lower for word in ["category", "categories"]) and any(word in question_lower for word in ["revenue", "sales"]):
-                return self._revenue_by_category()
+            # Compliance obligations
+            elif any(word in question_lower for word in ["compliance", "obligation", "legal"]) and any(word in question_lower for word in ["category", "type", "analysis"]):
+                return self._compliance_obligations()
             
-            # Customer segments
-            elif "customer" in question_lower and any(word in question_lower for word in ["segment", "distribution", "breakdown"]):
-                return self._customer_segments()
+            # Agent performance
+            elif any(word in question_lower for word in ["agent", "performance", "activity"]):
+                return self._agent_performance()
             
             # Default: show available data
             else:
@@ -790,37 +790,36 @@ class CompleteSimpleQueryProcessor:
                 "suggestions": ["Try a different question", "Check your data"]
             }
     
-    def _smartphone_laptop_comparison(self):
-        """Compare smartphone vs laptop sales"""
+    def _ai_cost_analysis(self):
+        """Analyze AI operational costs by model type"""
         pipeline = [
-            {"$match": {"category": {"$in": ["Smartphones", "Laptops"]}}},
             {"$group": {
-                "_id": "$category",
-                "total_revenue": {"$sum": "$total_amount"},
-                "total_quantity": {"$sum": "$quantity"},
-                "order_count": {"$sum": 1}
+                "_id": "$modelType",
+                "total_cost": {"$sum": "$totalCost"},
+                "total_tokens": {"$sum": {"$add": ["$inputTokens", "$outputTokens"]}},
+                "request_count": {"$sum": 1}
             }},
-            {"$sort": {"total_revenue": -1}}
+            {"$sort": {"total_cost": -1}}
         ]
         
-        results = list(self.db.sales.aggregate(pipeline))
+        results = list(self.db.costevalutionforllm.aggregate(pipeline))
         
         if not results:
-            return {"success": False, "error": "No smartphone or laptop data found"}
+            return {"success": False, "error": "No AI cost data found"}
         
         # Create summary
-        total_revenue = sum(r['total_revenue'] for r in results)
+        total_cost = sum(r['total_cost'] for r in results)
         summary_parts = []
         
         for result in results:
-            category = result['_id']
-            revenue = result['total_revenue']
-            quantity = result['total_quantity']
-            percentage = (revenue / total_revenue * 100) if total_revenue > 0 else 0
+            model_type = result['_id']
+            cost = result['total_cost']
+            tokens = result['total_tokens']
+            percentage = (cost / total_cost * 100) if total_cost > 0 else 0
             
-            summary_parts.append(f"{category}: ${revenue:,.2f} ({percentage:.1f}%) from {quantity} units")
+            summary_parts.append(f"{model_type}: ${cost:,.2f} ({percentage:.1f}%) from {tokens:,} tokens")
         
-        summary = "Sales comparison: " + " | ".join(summary_parts)
+        summary = "AI cost analysis: " + " | ".join(summary_parts)
         
         # Chart configuration
         chart_config = {
@@ -828,8 +827,8 @@ class CompleteSimpleQueryProcessor:
             "data": {
                 "labels": [r['_id'] for r in results],
                 "datasets": [{
-                    "label": "Revenue ($)",
-                    "data": [r['total_revenue'] for r in results],
+                    "label": "AI Cost ($)",
+                    "data": [r['total_cost'] for r in results],
                     "backgroundColor": ["rgba(59, 130, 246, 0.8)", "rgba(16, 185, 129, 0.8)"],
                     "borderColor": ["rgba(59, 130, 246, 1)", "rgba(16, 185, 129, 1)"],
                     "borderWidth": 2
@@ -838,12 +837,12 @@ class CompleteSimpleQueryProcessor:
             "options": {
                 "responsive": True,
                 "plugins": {
-                    "title": {"display": True, "text": "Smartphone vs Laptop Sales Revenue"},
+                    "title": {"display": True, "text": "AI Model Cost Analysis"},
                     "legend": {"display": False}
                 },
                 "scales": {
-                    "y": {"beginAtZero": True, "title": {"display": True, "text": "Revenue ($)"}},
-                    "x": {"title": {"display": True, "text": "Product Category"}}
+                    "y": {"beginAtZero": True, "title": {"display": True, "text": "Cost ($)"}},
+                    "x": {"title": {"display": True, "text": "AI Model"}}
                 }
             }
         }
@@ -867,36 +866,36 @@ class CompleteSimpleQueryProcessor:
             "query_source": "simple_direct"
         }
     
-    def _top_products(self):
-        """Get top selling products"""
+    def _document_confidence_analysis(self):
+        """Analyze document extraction confidence scores"""
         pipeline = [
             {"$group": {
-                "_id": "$product_name",
-                "total_revenue": {"$sum": "$total_amount"},
-                "total_quantity": {"$sum": "$quantity"},
-                "order_count": {"$sum": 1}
+                "_id": "$Type",
+                "avg_confidence": {"$avg": "$Confidence_Score"},
+                "total_extractions": {"$sum": 1},
+                "low_confidence_count": {"$sum": {"$cond": [{"$lt": ["$Confidence_Score", 0.8]}, 1, 0]}}
             }},
-            {"$sort": {"total_revenue": -1}},
+            {"$sort": {"avg_confidence": -1}},
             {"$limit": 10}
         ]
         
-        results = list(self.db.sales.aggregate(pipeline))
+        results = list(self.db.documentextractions.aggregate(pipeline))
         
         if not results:
-            return {"success": False, "error": "No product data found"}
+            return {"success": False, "error": "No document extraction data found"}
         
-        summary = f"Top {len(results)} products by revenue: "
+        summary = f"Top {len(results)} document types by confidence: "
         top_3 = results[:3]
-        for i, product in enumerate(top_3, 1):
-            summary += f"{i}. {product['_id']} (${product['total_revenue']:,.2f}) "
+        for i, doc_type in enumerate(top_3, 1):
+            summary += f"{i}. {doc_type['_id']} ({doc_type['avg_confidence']:.2f} confidence) "
         
         chart_config = {
             "type": "bar",
             "data": {
                 "labels": [r['_id'] for r in results],
                 "datasets": [{
-                    "label": "Revenue ($)",
-                    "data": [r['total_revenue'] for r in results],
+                    "label": "Avg Confidence",
+                    "data": [r['avg_confidence'] for r in results],
                     "backgroundColor": "rgba(59, 130, 246, 0.8)",
                     "borderColor": "rgba(59, 130, 246, 1)",
                     "borderWidth": 2
@@ -913,36 +912,36 @@ class CompleteSimpleQueryProcessor:
             "success": True,
             "summary": summary,
             "chart_data": chart_config,
-            "insights": [f"Total products: {len(results)}", f"Top performer: {results[0]['_id']}"],
-            "recommendations": ["Focus on top performers", "Analyze why these products succeed"],
+            "insights": [f"Total document types: {len(results)}", f"Highest confidence: {results[0]['_id']}"],
+            "recommendations": ["Focus on high-confidence extractions", "Analyze low-confidence patterns for improvement"],
             "results_count": len(results),
             "execution_time": 0.1,
             "query_source": "simple_direct"
         }
     
-    def _revenue_by_category(self):
-        """Revenue breakdown by category"""
+    def _compliance_obligations(self):
+        """Compliance obligations breakdown by type"""
         pipeline = [
             {"$group": {
-                "_id": "$category",
-                "total_revenue": {"$sum": "$total_amount"},
-                "total_quantity": {"$sum": "$quantity"}
+                "_id": "$obligationType",
+                "total_obligations": {"$sum": 1},
+                "avg_confidence": {"$avg": "$confidence"}
             }},
-            {"$sort": {"total_revenue": -1}}
+            {"$sort": {"total_obligations": -1}}
         ]
         
-        results = list(self.db.sales.aggregate(pipeline))
+        results = list(self.db.obligationextractions.aggregate(pipeline))
         
         if not results:
-            return {"success": False, "error": "No category data found"}
+            return {"success": False, "error": "No compliance obligation data found"}
         
-        total_revenue = sum(r['total_revenue'] for r in results)
-        summary = f"Revenue across {len(results)} categories: "
+        total_obligations = sum(r['total_obligations'] for r in results)
+        summary = f"Compliance obligations across {len(results)} types: "
         for result in results[:3]:  # Top 3
-            category = result['_id']
-            revenue = result['total_revenue']
-            percentage = (revenue / total_revenue * 100) if total_revenue > 0 else 0
-            summary += f"{category} ${revenue:,.2f} ({percentage:.1f}%), "
+            obligation_type = result['_id']
+            count = result['total_obligations']
+            percentage = (count / total_obligations * 100) if total_obligations > 0 else 0
+            summary += f"{obligation_type} {count} obligations ({percentage:.1f}%), "
         
         colors = [
             "rgba(59, 130, 246, 0.8)",   # Blue
@@ -958,14 +957,14 @@ class CompleteSimpleQueryProcessor:
             "data": {
                 "labels": [r['_id'] for r in results],
                 "datasets": [{
-                    "data": [r['total_revenue'] for r in results],
+                    "data": [r['total_obligations'] for r in results],
                     "backgroundColor": colors[:len(results)]
                 }]
             },
             "options": {
                 "responsive": True,
                 "plugins": {
-                    "title": {"display": True, "text": "Revenue by Category"},
+                    "title": {"display": True, "text": "Compliance Obligations by Type"},
                     "legend": {"display": True, "position": "bottom"}
                 }
             }
@@ -982,30 +981,30 @@ class CompleteSimpleQueryProcessor:
             "query_source": "simple_direct"
         }
     
-    def _customer_segments(self):
-        """Customer segment analysis"""
+    def _agent_performance(self):
+        """Agent performance analysis"""
         pipeline = [
             {"$group": {
-                "_id": "$customer_segment",
-                "total_spent": {"$sum": "$total_spent"},
-                "customer_count": {"$sum": 1},
-                "avg_spent": {"$avg": "$total_spent"}
+                "_id": "$Agent",
+                "success_count": {"$sum": {"$cond": [{"$eq": ["$Outcome", "Success"]}, 1, 0]}},
+                "total_activities": {"$sum": 1},
+                "avg_duration": {"$avg": "$duration"}
             }},
-            {"$sort": {"total_spent": -1}}
+            {"$sort": {"success_count": -1}}
         ]
         
-        results = list(self.db.customers.aggregate(pipeline))
+        results = list(self.db.agent_activity.aggregate(pipeline))
         
         if not results:
-            return {"success": False, "error": "No customer segment data found"}
+            return {"success": False, "error": "No agent performance data found"}
         
-        summary = "Customer segments: "
+        summary = "Agent performance: "
         for result in results:
-            segment = result['_id']
-            total = result['total_spent']
-            count = result['customer_count']
-            avg = result['avg_spent']
-            summary += f"{segment}: {count} customers, ${total:,.2f} total (avg: ${avg:,.2f}), "
+            agent = result['_id']
+            success = result['success_count']
+            total = result['total_activities']
+            success_rate = (success / total * 100) if total > 0 else 0
+            summary += f"{agent}: {success}/{total} ({success_rate:.1f}% success), "
         
         chart_config = {
             "type": "pie",
@@ -1041,14 +1040,14 @@ class CompleteSimpleQueryProcessor:
         """Show what data is available"""
         try:
             collections_info = []
-            for collection_name in ["sales", "customers", "products", "marketing_campaigns"]:
+            for collection_name in ["costevalutionforllm", "documentextractions", "obligationextractions", "agent_activity", "batches", "users", "conversations"]:
                 try:
                     count = self.db[collection_name].count_documents({})
                     collections_info.append(f"{collection_name}: {count} records")
                 except:
                     collections_info.append(f"{collection_name}: 0 records")
             
-            summary = f"Available data: {', '.join(collections_info)}. Try asking about: smartphone vs laptop sales, top products, customer segments, revenue by category."
+            summary = f"Available data: {', '.join(collections_info)}. Try asking about: AI operational costs, document processing confidence, compliance obligations, agent performance."
             
             return {
                 "success": True,
@@ -1056,9 +1055,9 @@ class CompleteSimpleQueryProcessor:
                 "chart_data": {"type": "bar", "data": {"labels": [], "datasets": []}},
                 "insights": ["System ready", "Multiple question types supported"],
                 "recommendations": [
-                    "Try: 'Compare smartphone vs laptop sales'",
-                    "Try: 'Show me customer segments'",
-                    "Try: 'What's our revenue by category?'"
+                    "Try: 'What are our AI operational costs this month?'",
+                    "Try: 'Show me document extraction confidence trends'",
+                    "Try: 'Which compliance obligations need attention?'"
                 ],
                 "results_count": 0,
                 "execution_time": 0.1,
@@ -1078,31 +1077,9 @@ class PerfectedTwoStageProcessor:
         self.gemini_client = gemini_client
         self.simple_processor = simple_processor
         self.db = database
-        self.schema_info = {
-            "collections": {
-                "sales": {
-                    "description": "Sales transaction records",
-                    "fields": ["order_id", "customer_id", "product_id", "product_name", "category", "quantity", "unit_price", "total_amount", "discount", "date", "month", "quarter", "sales_rep", "region"],
-                    "sample_values": {
-                        "category": ["Smartphones", "Laptops", "Audio", "Tablets", "Accessories", "Monitors"],
-                        "region": ["North America", "Europe", "Asia-Pacific"],
-                        "month": ["January", "February", "March", "April", "May", "June", "July"]
-                    },
-                    "numeric_fields": ["quantity", "unit_price", "total_amount", "discount"]
-                },
-                "customers": {
-                    "description": "Customer profiles and behavior",
-                    "fields": ["customer_id", "name", "email", "age", "gender", "country", "state", "city", "customer_segment", "total_spent", "order_count", "signup_date", "last_purchase"],
-                    "sample_values": {"customer_segment": ["Regular", "Premium", "VIP"]},
-                    "numeric_fields": ["age", "total_spent", "order_count"]
-                },
-                "products": {
-                    "description": "Product catalog and inventory",
-                    "fields": ["product_id", "name", "category", "subcategory", "brand", "price", "cost", "stock", "rating", "reviews_count", "launch_date"],
-                    "numeric_fields": ["price", "cost", "stock", "rating", "reviews_count"]
-                }
-            }
-        }
+        # Import GenAI schema from config
+        from config import DATABASE_SCHEMA
+        self.schema_info = DATABASE_SCHEMA.copy()
     
     async def process_question(self, user_question: str) -> Dict[str, Any]:
         """Enhanced two-stage processing with Gemini priority"""
@@ -1192,9 +1169,9 @@ class PerfectedTwoStageProcessor:
                 "error": "Unable to process your question with available methods",
                 "suggestions": [
                     "Try a simpler question",
-                    "Ask about: 'smartphone vs laptop sales'",
-                    "Ask about: 'customer segments'",
-                    "Ask about: 'revenue by category'"
+                    "Ask about: 'What are our AI operational costs?'",
+                    "Ask about: 'Show me document extraction confidence'",
+                    "Ask about: 'Which compliance obligations need attention?'"
                 ]
             }
     
@@ -1670,19 +1647,65 @@ def delete_chat_session_endpoint(chat_id):
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        "status": "online",
-        "timestamp": datetime.now().isoformat(),
-        "services": {
-            "database": "available" if mongodb_available else "unavailable",
-            "gemini": "available" if gemini_available else "unavailable",
-            "simple_processor": "available" if simple_processor else "unavailable",
-            "two_stage_processor": "available" if two_stage_processor else "unavailable",
-            "chat_system": "available" if mongodb_available else "unavailable"
-        },
-        "version": "3.0.0-perfected-ai-system-with-chat"
-    })
+    """Enhanced health check for GenAI operations"""
+    try:
+        health_status = {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "database": "disconnected",
+            "ai_system": "unavailable",
+            "collections": {},
+            "domain": "AI Operations & Document Intelligence"
+        }
+        
+        # Database health check
+        if mongodb_available and db is not None:
+            health_status["database"] = "connected"
+            
+            # Check GenAI collections instead of old ones
+            genai_collections = [
+                "costevalutionforllm", "documentextractions", "obligationextractions",
+                "agent_activity", "batches", "users", "conversations"
+            ]
+            
+            collection_status = {}
+            total_documents = 0
+            
+            for collection_name in genai_collections:
+                try:
+                    collection = db[collection_name]
+                    count = collection.count_documents({})
+                    collection_status[collection_name] = {
+                        "status": "available",
+                        "document_count": count
+                    }
+                    total_documents += count
+                except Exception as e:
+                    collection_status[collection_name] = {
+                        "status": "error",
+                        "error": str(e)
+                    }
+            
+            health_status["collections"] = collection_status
+            health_status["total_documents"] = total_documents
+        
+        # AI system health check
+        if gemini_available:
+            health_status["ai_system"] = "available"
+            health_status["processors"] = {
+                "two_stage": two_stage_processor is not None,
+                "simple": simple_processor is not None,
+                "memory_enhanced": memory_enhanced_processor is not None
+            }
+        
+        return jsonify(health_status)
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/query', methods=['POST'])
 def process_query():
@@ -1782,10 +1805,10 @@ def test_system_components():
         # Test database
         if mongodb_available and db is not None:
             try:
-                count = db.sales.count_documents({})
+                count = db.costevalutionforllm.count_documents({})
                 test_results["tests"]["database"] = {
                     "status": "pass",
-                    "details": f"Sales collection has {count} documents"
+                    "details": f"AI cost collection has {count} documents"
                 }
             except Exception as e:
                 test_results["tests"]["database"] = {
@@ -1873,7 +1896,7 @@ def test_system_components():
                     result = loop.run_until_complete(
                         gemini_client.generate_query(
                             "Test query", 
-                            {"collections": {"sales": {"fields": ["category", "total_amount"]}}}
+                            {"collections": {"costevalutionforllm": {"fields": ["modelType", "totalCost"]}}}
                         )
                     )
                     test_results["tests"]["gemini_ai"] = {
@@ -1902,7 +1925,7 @@ def test_system_components():
                 
                 try:
                     result = loop.run_until_complete(
-                        two_stage_processor.process_question("Compare smartphone vs laptop sales")
+                        two_stage_processor.process_question("What are our AI operational costs this month?")
                     )
                     test_results["tests"]["two_stage_processor"] = {
                         "status": "pass" if result.get("success") else "fail",
@@ -1942,50 +1965,94 @@ def test_system_components():
         }), 500
 
 @app.route('/api/examples', methods=['GET'])
-def get_enhanced_examples():
-    """Get comprehensive example questions"""
+def get_example_questions():
+    """Get example questions for GenAI operations analytics"""
+    
     examples = {
-        "guaranteed_working": {
-            "description": "These questions are guaranteed to work with both AI and fallback",
-            "questions": [
-                "Compare smartphone vs laptop sales performance",
-                "Show me customer distribution by segment", 
-                "What's our revenue by category?",
-                "What are our top selling products?"
+        "ai_operations": {
+            "description": "AI cost analysis and performance optimization",
+            "examples": [
+                "What's our AI spending this month?",
+                "Which AI models are most cost-effective?",
+                "Show me token usage patterns by user",
+                "Compare processing costs between document types",
+                "What's our average cost per document extraction?"
+            ]
+        },
+        "document_processing": {
+            "description": "Document extraction and processing analytics",
+            "examples": [
+                "How many documents did we process today?",
+                "What's our extraction success rate?",
+                "Show me documents with low confidence scores",
+                "Which document types take longest to process?",
+                "What are our confidence score distributions?"
+            ]
+        },
+        "compliance_analytics": {
+            "description": "Legal compliance and risk assessment",
+            "examples": [
+                "What are our most critical compliance obligations?",
+                "Show me high-risk compliance items",
+                "Which contracts have data confidentiality requirements?",
+                "Track compliance obligation trends over time",
+                "List all insurance-related obligations"
+            ]
+        },
+        "operational_intelligence": {
+            "description": "System performance and user analytics",
+            "examples": [
+                "How are our AI agents performing?",
+                "Show me batch processing success rates",
+                "Which users are most active in the system?",
+                "What's our overall system health status?",
+                "Compare agent performance across document types"
+            ]
+        },
+        "advanced_analytics": {
+            "description": "Cross-collection complex analysis",
+            "examples": [
+                "Show AI costs for documents that failed compliance",
+                "Which prompts are most effective for legal documents?",
+                "Compare extraction confidence vs processing costs",
+                "Track document processing pipeline success rates",
+                "Show ROI analysis for different AI models"
             ]
         },
         "chat_integration_examples": {
             "description": "Examples showing how to use chat functionality",
-            "create_new_chat": "POST /api/chats with {\"title\": \"Revenue Analysis\", \"category\": \"analysis\"}",
-            "query_with_chat": "POST /api/query with {\"question\": \"Show revenue by category\", \"chat_id\": \"chat_123\"}",
+            "create_new_chat": "POST /api/chats with {\"title\": \"AI Cost Analysis\", \"category\": \"operations\"}",
+            "query_with_chat": "POST /api/query with {\"question\": \"Show AI spending trends\", \"chat_id\": \"chat_123\"}",
             "get_chat_history": "GET /api/chats/chat_123",
             "list_all_chats": "GET /api/chats?limit=20&status=active"
         },
         "system_capabilities": {
             "ai_features": [
-                "Natural language understanding",
-                "Intelligent chart type selection",
-                "Context-aware insights generation",
-                "Automated recommendations",
-                "Chat session persistence",
-                "Message history tracking"
+                "Natural language understanding for AI operations",
+                "Intelligent chart type selection for operational data",
+                "Context-aware insights generation for cost optimization",
+                "Automated recommendations for system improvements",
+                "Chat session persistence with operational context",
+                "Memory-enhanced conversations for better follow-ups"
             ],
             "fallback_features": [
-                "Pattern-based query processing",
-                "Guaranteed response for common questions",
-                "Fast processing times",
-                "Reliable basic analytics",
-                "Chat session management",
-                "Real-time message saving"
+                "Pattern-based query processing for GenAI collections",
+                "Guaranteed response for common operational questions",
+                "Fast processing times for system health queries",
+                "Reliable basic analytics for cost and performance data",
+                "Chat session management for operational discussions",
+                "Real-time message saving for audit trails"
             ]
         }
     }
     
     return jsonify(examples)
 
+# Replace the debug_collections endpoint in your app.py (around line 1100)
+
 @app.route('/api/debug/collections', methods=['GET'])
 def debug_collections():
-    """Debug endpoint with enhanced information"""
+    """Debug endpoint with enhanced information for GenAI collections"""
     if not mongodb_available or db is None:
         return jsonify({"error": "Database not available"}), 503
     
@@ -1999,9 +2066,48 @@ def debug_collections():
                 count = collection.count_documents({})
                 sample = collection.find_one() if count > 0 else None
                 
-                # Convert ObjectId to string for JSON serialization
+                # Convert ObjectId to string for JSON serialization - FIXED
                 if sample and '_id' in sample:
                     sample['_id'] = str(sample['_id'])
+                
+                # Clean all fields for JSON serialization - NEW FIX
+                if sample:
+                    cleaned_sample = {}
+                    for key, value in sample.items():
+                        if hasattr(value, 'isoformat'):  # datetime
+                            cleaned_sample[key] = value.isoformat()
+                        elif hasattr(value, '__str__') and hasattr(value, 'hex'):  # ObjectId
+                            cleaned_sample[key] = str(value)
+                        elif isinstance(value, dict):
+                            # Recursively clean nested objects
+                            cleaned_value = {}
+                            for k, v in value.items():
+                                if hasattr(v, 'isoformat'):
+                                    cleaned_value[k] = v.isoformat()
+                                elif hasattr(v, '__str__') and hasattr(v, 'hex'):
+                                    cleaned_value[k] = str(v)
+                                else:
+                                    cleaned_value[k] = str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v
+                            cleaned_sample[key] = cleaned_value
+                        elif isinstance(value, list):
+                            # Clean list items
+                            cleaned_list = []
+                            for item in value[:3]:  # Limit to first 3 items
+                                if hasattr(item, 'isoformat'):
+                                    cleaned_list.append(item.isoformat())
+                                elif hasattr(item, '__str__') and hasattr(item, 'hex'):
+                                    cleaned_list.append(str(item))
+                                else:
+                                    cleaned_list.append(str(item) if not isinstance(item, (str, int, float, bool, type(None))) else item)
+                            cleaned_sample[key] = cleaned_list
+                        else:
+                            # Convert everything else to string if it's not a basic type
+                            if isinstance(value, (str, int, float, bool, type(None))):
+                                cleaned_sample[key] = value
+                            else:
+                                cleaned_sample[key] = str(value)
+                    
+                    sample = cleaned_sample
                 
                 # Get field statistics
                 field_stats = {}
@@ -2012,13 +2118,21 @@ def debug_collections():
                             "sample_value": str(value)[:100]  # Truncate long values
                         }
                 
+                # Determine if collection is AI operations compatible
+                ai_compatible = collection_name in [
+                    "costevalutionforllm", "documentextractions", "obligationextractions",
+                    "agent_activity", "batches", "users", "conversations", "prompts",
+                    "files", "compliances", "obligationmappings", "documentmappings"
+                ]
+                
                 collections_info[collection_name] = {
                     "document_count": count,
                     "sample_fields": list(sample.keys()) if sample else [],
                     "field_statistics": field_stats,
                     "sample_document": sample,
-                    "ai_compatible": collection_name in ["sales", "customers", "products", "marketing_campaigns"],
-                    "is_chat_collection": collection_name == "chat_sessions"
+                    "ai_compatible": ai_compatible,
+                    "is_chat_collection": collection_name in ["conversations", "chat_sessions"],
+                    "domain_relevance": "high" if ai_compatible else "low"
                 }
             except Exception as e:
                 collections_info[collection_name] = {
@@ -2030,6 +2144,7 @@ def debug_collections():
         
         return jsonify({
             "database_name": db.name,
+            "domain": "AI Operations & Document Intelligence",
             "total_collections": len(collections_info),
             "collection_names": collection_names,
             "collections": collections_info,
@@ -2037,7 +2152,8 @@ def debug_collections():
                 "gemini_available": gemini_available,
                 "two_stage_processor": two_stage_processor is not None,
                 "simple_processor": simple_processor is not None,
-                "chat_system": mongodb_available
+                "chat_system": mongodb_available,
+                "memory_rag": memory_manager is not None
             }
         })
         
@@ -2196,47 +2312,52 @@ def search_memories(chat_id):
             "error": str(e)
         }), 500 
 
+
 if __name__ == '__main__':
-    print("\n🔗 Starting PERFECTED AI Analytics Server with Chat...")
-    print("🎯 AI-First Features:")
-    print("   - ✅ Bulletproof Gemini two-stage processing")
+    print("\n🔗 Starting GenAI Operations Analytics Server with Chat...")
+    print("🎯 AI Operations Features:")
+    print("   - ✅ Bulletproof Gemini two-stage processing for AI operations")
     print("   - ✅ Enhanced retry logic with exponential backoff")
     print("   - ✅ Intelligent JSON extraction and validation")
-    print("   - ✅ Smart fallback visualizations")
+    print("   - ✅ Smart fallback visualizations for operational data")
     print("   - ✅ Complete simple processor backup")
-    print("   - ✅ NEW: Complete chat session management")
-    print("   - ✅ NEW: Real-time message persistence")
-    print("   - ✅ NEW: Chat history and search")
-    print("   - ✅ NEW: Smart context-aware follow-up suggestions")
+    print("   - ✅ Complete chat session management")
+    print("   - ✅ Real-time message persistence")
+    print("   - ✅ Chat history and search")
+    print("   - ✅ Smart context-aware follow-up suggestions")
+    print("   - ✅ Memory RAG system for operational intelligence")
     
     print("\n🔧 System Status:")
     if mongodb_available:
-        print("   ✅ MongoDB: Connected and ready")
+        print("   ✅ MongoDB: Connected to GenAI operations database")
         print("   ✅ Chat System: Indexes created, ready for persistence")
     else:
         print("   ❌ MongoDB: Connection failed")
         print("   ❌ Chat System: Not available")
     
     if gemini_available:
-        print("   ✅ Gemini AI: Bulletproof client ready")
+        print("   ✅ Gemini AI: Bulletproof client ready for AI operations")
     else:
         print("   ⚠️ Gemini AI: Not available")
     
     if two_stage_processor:
-        print("   ✅ Perfected Two-Stage Processor: AI-first processing ready")
+        print("   ✅ Perfected Two-Stage Processor: AI operations processing ready")
     elif simple_processor:
         print("   ✅ Complete Simple Processor: Fallback processing ready")
     else:
         print("   ❌ No processors available")
     
+    if memory_manager:
+        print("   ✅ Memory RAG: Advanced conversation memory system ready")
+    
     print(f"\n🌐 Server starting on http://localhost:5000")
-    print("📊 Enhanced endpoints:")
-    print("   - POST /api/query (AI-first intelligent processing + chat integration)")
+    print("📊 GenAI Operations Endpoints:")
+    print("   - POST /api/query (AI operations intelligent processing + chat)")
     print("   - POST /api/system/test (comprehensive system testing)")
     print("   - GET  /api/health (system health)")
-    print("   - GET  /api/examples (enhanced example questions)")
-    print("   - GET  /api/debug/collections (enhanced debug info)")
-    print("\n💬 NEW: Chat Management Endpoints:")
+    print("   - GET  /api/examples (GenAI operations example questions)")
+    print("   - GET  /api/debug/collections (GenAI collections debug info)")
+    print("\n💬 Chat Management Endpoints:")
     print("   - GET  /api/chats (list all chat sessions)")
     print("   - POST /api/chats (create new chat session)")
     print("   - GET  /api/chats/{id} (get specific chat)")
@@ -2244,6 +2365,12 @@ if __name__ == '__main__':
     print("   - DELETE /api/chats/{id} (delete chat session)")
     print("   - POST /api/chats/{id}/messages (add message to chat)")
     print("   - GET  /api/chats/stats (chat system statistics)")
-    print("=" * 60)
+    print("\n🤖 AI Operations Domain:")
+    print("   - Cost analysis and optimization")
+    print("   - Document processing intelligence")
+    print("   - Compliance risk assessment")
+    print("   - Agent performance monitoring")
+    print("   - Operational efficiency analytics")
+    print("=" * 80)
     
     app.run(debug=True, host='0.0.0.0', port=5000)

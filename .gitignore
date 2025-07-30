@@ -5,6 +5,7 @@
 # --- Secrets ---
 .env
 *.env
+.claude/
 
 # --- Python Virtual Environment ---
 web-scraping-pipeline/

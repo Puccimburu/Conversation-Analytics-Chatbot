@@ -1,7 +1,7 @@
 # backend/utils/memory_rag.py
 """
 Advanced Memory RAG System for Conversational AI
-Enhanced with Smart Suggestions Generation
+Enhanced with Smart Suggestions Generation for GenAI Operations
 """
 
 import logging
@@ -14,6 +14,7 @@ from dataclasses import dataclass, asdict
 import pymongo
 from bson import ObjectId
 import hashlib
+from config import DATABASE_SCHEMA  # Import GenAI schema
 
 logger = logging.getLogger(__name__)
 
@@ -58,182 +59,192 @@ class ConversationContext:
 class SmartSuggestionGenerator:
     """
     Generates intelligent follow-up questions using conversation context
-    FIXED for BulletproofGeminiClient compatibility
+    Enhanced for GenAI operations and document intelligence
     """
     
     def __init__(self, gemini_client, memory_manager=None):
         self.gemini_client = gemini_client
         self.memory_manager = memory_manager
         
-        # Default fallback suggestions
+        # GenAI-specific default suggestions
         self.default_suggestions = [
-            'Show this as a different chart type',
-            'What are the monthly trends?',
-            'How does this compare to last year?',
-            'Show me the top 10 results',
-            'Break this down by region',
-            'Analyze the seasonal patterns'
+            'What are our AI operational costs this month?',
+            'Show me document extraction confidence trends',
+            'Which compliance obligations need attention?',
+            'How are our AI agents performing?',
+            'Compare processing efficiency across document types'
         ]
         
-        # Database schema awareness for generating answerable questions
-        self.available_collections = ['sales', 'products', 'customers', 'user_engagement']
-        self.available_fields = {
-            'sales': ['order_id', 'customer_id', 'product_id', 'product_name', 'category', 
-                     'quantity', 'unit_price', 'total_amount', 'discount', 'date', 'month', 
-                     'quarter', 'sales_rep', 'region'],
-            'products': ['product_id', 'name', 'category', 'brand', 'price', 'cost', 
-                        'stock', 'rating', 'reviews_count'],
-            'customers': ['customer_id', 'name', 'email', 'age', 'gender', 'country', 
-                         'state', 'city', 'customer_segment', 'total_spent', 'order_count']
+        # Enhanced domain context for GenAI operations
+        self.domain_context = {
+            "domain": "AI Operations & Document Intelligence",
+            "primary_metrics": [
+                "AI costs and spending", "document processing efficiency", 
+                "extraction confidence scores", "compliance obligation tracking",
+                "agent performance metrics", "batch processing success rates"
+            ],
+            "key_collections": list(DATABASE_SCHEMA["collections"].keys()),
+            "analysis_types": [
+                "cost_optimization", "quality_assurance", "compliance_management",
+                "operational_efficiency", "user_productivity"
+            ]
         }
     
-    async def generate_smart_suggestions(self, chat_id: str, current_result: Dict, 
-                                       user_question: str) -> List[str]:
+    async def generate_smart_suggestions(self, question: str, result: Dict, 
+                                       conversation_context: Optional[Dict] = None) -> List[str]:
         """
-        Generate context-aware follow-up suggestions
-        Returns default suggestions if AI generation fails (failsafe)
+        Generate intelligent follow-up suggestions based on GenAI operations context
         """
         try:
-            # Quick background generation - don't block main response
-            suggestions = await asyncio.wait_for(
-                self._generate_contextual_suggestions(chat_id, current_result, user_question),
-                timeout=5.0  # 5 second timeout to not delay UI
-            )
+            if not self.gemini_client:
+                return self.get_default_suggestions()
             
-            # Validate suggestions are answerable by our system
-            validated_suggestions = self._validate_suggestions(suggestions)
+            # Build comprehensive context for suggestion generation
+            suggestion_context = {
+                "original_question": question,
+                "result_summary": self._extract_result_summary(result),
+                "domain_context": self.domain_context,
+                "conversation_history": conversation_context or {},
+                "available_data": self._get_available_data_context()
+            }
             
-            if len(validated_suggestions) >= 3:
-                logger.info(f"✅ Generated {len(validated_suggestions)} smart suggestions")
-                return validated_suggestions[:6]  # Max 6 suggestions
-            else:
-                logger.info("🔄 Using default suggestions (validation failed)")
-                return self.default_suggestions
-                
-        except asyncio.TimeoutError:
-            logger.info("⏱️ Suggestion generation timeout - using defaults")
-            return self.default_suggestions
-        except Exception as e:
-            logger.error(f"❌ Suggestion generation failed: {e}")
-            return self.default_suggestions
-    
-    async def _generate_contextual_suggestions(self, chat_id: str, current_result: Dict, 
-                                             user_question: str) -> List[str]:
-        """Generate suggestions using BulletproofGeminiClient with correct interface"""
-        
-        # Check if the client is available
-        if not hasattr(self.gemini_client, 'available') or not self.gemini_client.available:
-            logger.warning("⚠️ Gemini client not available for suggestions")
-            return []
-        
-        # Build context from memory if available
-        memory_context = ""
-        if self.memory_manager and chat_id:
+            # Generate suggestions using Gemini
+            suggestions_prompt = self._build_suggestions_prompt(suggestion_context)
+            
             try:
-                context = await self.memory_manager.build_conversation_context(chat_id, user_question)
-                memory_context = f"""
-CONVERSATION CONTEXT:
-- Themes: {', '.join(context.conversation_themes[:3])}
-- Recent entities: {', '.join(context.recent_entities[:5])}
-- User preferences: {json.dumps(context.user_preferences) if context.user_preferences else 'None'}
-"""
-            except Exception as e:
-                logger.warning(f"Failed to build memory context: {e}")
-                memory_context = ""
-        
-        # Extract key info from current result
-        chart_type = current_result.get('chart_data', {}).get('type', 'unknown')
-        summary = current_result.get('summary', '')
-        insights = current_result.get('insights', [])
-        data_points = len(current_result.get('chart_data', {}).get('data', {}).get('labels', []))
-        
-        # Create intelligent prompt
-        prompt = f"""
-You are an analytics assistant. Based on the user's question and current results, generate 5 smart follow-up questions that naturally extend the analysis.
-
-USER QUESTION: "{user_question}"
-
-CURRENT ANALYSIS:
-- Chart type: {chart_type}
-- Summary: {summary}
-- Key insights: {'; '.join(insights[:2]) if insights else 'None'}
-- Data points shown: {data_points}
-
-{memory_context}
-
-AVAILABLE DATA STRUCTURE:
-- Sales data: order_id, customer_id, product_name, category, quantity, unit_price, total_amount, date, month, quarter, region
-- Product data: name, category, brand, price, cost, stock, rating
-- Customer data: customer_segment, age, gender, country, state, city, total_spent
-
-GENERATE 5 follow-up questions that:
-1. Build naturally on the current analysis
-2. Can be answered with the available data fields
-3. Provide deeper business insights
-4. Use conversational, business-friendly language
-5. Focus on actionable analysis (trends, comparisons, segments)
-
-Examples of good follow-ups:
-- "What drove the January sales spike?"
-- "Which product categories performed best?"
-- "How do our top customers compare by region?"
-- "What's the seasonal pattern in this data?"
-
-Return ONLY a JSON array of 5 question strings, no other text:
-["question 1", "question 2", "question 3", "question 4", "question 5"]
-"""
-
-        try:
-            # 🚀 FIX: Use the correct method from BulletproofGeminiClient
-            # Your client uses model.generate_content() directly
-            response = self.gemini_client.model.generate_content(
-                prompt,
-                generation_config={
-                    'temperature': 0.3,
-                    'max_output_tokens': 500,
-                    'top_p': 0.8
-                }
-            )
-            
-            # Extract JSON from response
-            response_text = response.text.strip()
-            
-            # Find JSON array in response
-            json_match = re.search(r'\[.*?\]', response_text, re.DOTALL)
-            if json_match:
-                suggestions_json = json_match.group()
-                suggestions = json.loads(suggestions_json)
+                # Use Gemini to generate contextual suggestions
+                response = await self.gemini_client.generate_content_async(suggestions_prompt)
                 
-                if isinstance(suggestions, list) and len(suggestions) > 0:
-                    return [str(s).strip() for s in suggestions if s.strip()]
+                if response and hasattr(response, 'text'):
+                    suggestions = self._parse_suggestions_response(response.text)
+                    validated_suggestions = self._validate_suggestions(suggestions)
+                    
+                    if validated_suggestions:
+                        logger.info(f"✅ Generated {len(validated_suggestions)} smart suggestions")
+                        return validated_suggestions[:5]  # Return top 5
+                
+            except Exception as e:
+                logger.warning(f"Gemini suggestion generation failed: {e}")
             
-            logger.warning("⚠️ Failed to parse Gemini suggestions response")
-            return []
+            # Fallback to context-aware default suggestions
+            return self._generate_contextual_fallback_suggestions(question, result)
             
         except Exception as e:
-            logger.error(f"❌ Gemini suggestion generation failed: {e}")
-            return []
+            logger.error(f"Smart suggestion generation error: {e}")
+            return self.get_default_suggestions()
+    
+    def _extract_result_summary(self, result: Dict) -> str:
+        """Extract key information from the analysis result"""
+        summary_parts = []
+        
+        if result.get('success'):
+            if result.get('query_data', {}).get('collection'):
+                collection = result['query_data']['collection']
+                summary_parts.append(f"Analyzed {collection} collection")
+            
+            if result.get('raw_results'):
+                count = len(result['raw_results'])
+                summary_parts.append(f"Found {count} records")
+            
+            if result.get('visualization', {}).get('chart_type'):
+                chart_type = result['visualization']['chart_type']
+                summary_parts.append(f"Displayed as {chart_type} chart")
+            
+            if result.get('insights'):
+                insight_count = len(result['insights'])
+                summary_parts.append(f"Generated {insight_count} insights")
+        
+        return "; ".join(summary_parts) if summary_parts else "Analysis completed"
+    
+    def _get_available_data_context(self) -> Dict:
+        """Get context about available data for better suggestions"""
+        return {
+            "collections": list(DATABASE_SCHEMA["collections"].keys()),
+            "ai_operations": [
+                "costevalutionforllm", "llmpricing", "agent_activity"
+            ],
+            "document_processing": [
+                "documentextractions", "obligationextractions", "batches", "files"
+            ],
+            "user_management": [
+                "users", "allowedusers", "conversations"
+            ],
+            "compliance": [
+                "obligationextractions", "obligationmappings", "compliances"
+            ]
+        }
+    
+    def _build_suggestions_prompt(self, context: Dict) -> str:
+        """Build a comprehensive prompt for generating smart suggestions"""
+        return f"""
+You are an AI Operations Analytics expert generating intelligent follow-up questions.
+
+CONTEXT:
+- Domain: {context['domain_context']['domain']}
+- Original Question: "{context['original_question']}"
+- Analysis Result: {context['result_summary']}
+- Available Collections: {', '.join(context['available_data']['collections'][:10])}
+
+TASK: Generate 5 intelligent follow-up questions that would provide valuable insights for AI operations management.
+
+FOCUS AREAS:
+1. Cost optimization and efficiency
+2. Document processing quality
+3. Compliance and risk management
+4. Operational performance
+5. User productivity and system health
+
+REQUIREMENTS:
+- Questions should be specific and actionable
+- Focus on operational insights and optimization
+- Consider both immediate and strategic value
+- Use natural, conversational language
+- Avoid generic or vague questions
+
+EXAMPLES OF GOOD FOLLOW-UPS:
+- "Which AI models are driving our highest costs?"
+- "Show me documents with confidence scores below 90%"
+- "What's causing our batch processing delays?"
+- "Which compliance obligations have the highest risk?"
+
+Generate 5 smart follow-up questions (one per line, no numbering):
+"""
+    
+    def _parse_suggestions_response(self, response_text: str) -> List[str]:
+        """Parse suggestions from Gemini response"""
+        lines = response_text.strip().split('\n')
+        suggestions = []
+        
+        for line in lines:
+            line = line.strip()
+            # Remove numbering, bullets, and clean up
+            line = re.sub(r'^\d+[\.\)]\s*', '', line)
+            line = re.sub(r'^[-•*]\s*', '', line)
+            line = line.strip('"\'')
+            
+            if line and len(line) > 10 and '?' in line:
+                suggestions.append(line)
+        
+        return suggestions[:8]  # Return up to 8 for validation
     
     def _validate_suggestions(self, suggestions: List[str]) -> List[str]:
-        """
-        Validate that suggestions can likely be answered by our system
-        Filter out questions that reference unavailable data
-        """
+        """Validate and filter suggestions for GenAI operations relevance"""
+        if not suggestions:
+            return []
+        
         validated = []
         
-        # Keywords that indicate answerable questions
+        # GenAI operations keywords (good)
         good_keywords = [
-            'sales', 'revenue', 'customers', 'products', 'category', 'region', 
-            'month', 'quarter', 'trends', 'compare', 'top', 'bottom', 'best', 
-            'worst', 'segment', 'price', 'cost', 'rating', 'brand', 'age',
-            'country', 'state', 'city', 'total', 'average', 'highest', 'lowest'
+            'cost', 'spending', 'efficiency', 'confidence', 'extraction', 'document',
+            'compliance', 'obligation', 'agent', 'batch', 'processing', 'model',
+            'token', 'performance', 'quality', 'risk', 'user', 'operational'
         ]
         
-        # Keywords that indicate potentially problematic questions
+        # Generic or irrelevant keywords (bad)
         bad_keywords = [
-            'external', 'api', 'real-time', 'live', 'current', 'today',
-            'competitor', 'market share', 'social media', 'weather',
-            'stock price', 'exchange rate', 'gdp', 'inflation'
+            'weather', 'sports', 'entertainment', 'recipes', 'jokes', 'games',
+            'personal', 'dating', 'shopping', 'travel', 'social media'
         ]
         
         for suggestion in suggestions:
@@ -244,25 +255,88 @@ Return ONLY a JSON array of 5 question strings, no other text:
             if has_bad_keywords:
                 continue
             
-            # Check for good keywords or general analytical patterns
+            # Check for good keywords or analytical patterns
             has_good_keywords = any(good_word in suggestion_lower for good_word in good_keywords)
             has_analytical_pattern = any(pattern in suggestion_lower for pattern in [
-                'what', 'which', 'how', 'show', 'compare', 'analyze', 'breakdown'
+                'what', 'which', 'how', 'show', 'compare', 'analyze', 'track', 'find'
             ])
             
             if has_good_keywords or has_analytical_pattern:
                 validated.append(suggestion)
         
         return validated
-
+    
+    def _generate_contextual_fallback_suggestions(self, question: str, result: Dict) -> List[str]:
+        """Generate context-aware fallback suggestions for GenAI operations"""
+        question_lower = question.lower()
+        suggestions = []
+        
+        # Cost-related follow-ups
+        if any(keyword in question_lower for keyword in ['cost', 'spending', 'price', 'expensive']):
+            suggestions.extend([
+                'Which AI models are most cost-effective?',
+                'Show me cost trends over the last 3 months',
+                'Compare costs between document types',
+                'Which users generate the highest AI costs?'
+            ])
+        
+        # Document processing follow-ups
+        elif any(keyword in question_lower for keyword in ['document', 'extraction', 'confidence']):
+            suggestions.extend([
+                'Show me documents with low confidence scores',
+                'Which document types have highest accuracy?',
+                'What are our extraction success rates?',
+                'Compare processing times by document size'
+            ])
+        
+        # Compliance follow-ups
+        elif any(keyword in question_lower for keyword in ['compliance', 'obligation', 'legal', 'risk']):
+            suggestions.extend([
+                'What are our highest risk compliance items?',
+                'Show me recent compliance obligation changes',
+                'Which contracts need compliance review?',
+                'Track compliance resolution progress'
+            ])
+        
+        # Agent/performance follow-ups
+        elif any(keyword in question_lower for keyword in ['agent', 'performance', 'batch', 'processing']):
+            suggestions.extend([
+                'How can we improve agent performance?',
+                'Show me batch processing failure patterns',
+                'Which agents handle complex documents best?',
+                'What causes processing delays?'
+            ])
+        
+        # General operational follow-ups
+        else:
+            suggestions.extend([
+                'What are our key operational metrics today?',
+                'Show me system health overview',
+                'Which areas need immediate attention?',
+                'Compare this month vs last month performance'
+            ])
+        
+        # Add result-specific suggestions
+        if result.get('query_data', {}).get('collection'):
+            collection = result['query_data']['collection']
+            if collection == 'costevalutionforllm':
+                suggestions.append('Break down costs by model and operation type')
+            elif collection == 'documentextractions':
+                suggestions.append('Show me extraction confidence distribution')
+            elif collection == 'obligationextractions':
+                suggestions.append('Which obligations require immediate action?')
+        
+        return suggestions[:5]  # Return top 5
+    
     def get_default_suggestions(self) -> List[str]:
-        """Get the default fallback suggestions"""
+        """Get the default fallback suggestions for GenAI operations"""
         return self.default_suggestions.copy()
+
 
 class MemoryRAGManager:
     """
     Advanced Memory RAG system for chat-based conversational AI
-    Implements sophisticated memory management similar to ChatGPT
+    Enhanced for GenAI operations and document intelligence
     """
     
     def __init__(self, database, gemini_client=None):
@@ -277,128 +351,68 @@ class MemoryRAGManager:
         self.relevance_threshold = 0.3
         self.max_context_tokens = 4000
         
+        # GenAI domain context
+        self.domain_context = {
+            "domain": "AI Operations & Document Intelligence",
+            "key_entities": [
+                "AI models", "document types", "compliance obligations", 
+                "processing batches", "extraction confidence", "users", "agents"
+            ],
+            "important_metrics": [
+                "costs", "token usage", "confidence scores", "processing times",
+                "success rates", "compliance status"
+            ]
+        }
+        
     def ensure_memory_indexes(self):
         """Create optimized indexes for memory retrieval"""
         try:
             # Core indexes for fast retrieval
-            self.memory_collection.create_index("chat_id")
-            self.memory_collection.create_index("fragment_id", unique=True)
-            self.memory_collection.create_index([("chat_id", 1), ("timestamp", -1)])
-            self.memory_collection.create_index([("chat_id", 1), ("importance_score", -1)])
+            self.memory_collection.create_index([
+                ("chat_id", 1),
+                ("timestamp", -1)
+            ])
             
-            # Text search indexes
-            self.memory_collection.create_index([("content", "text"), ("keywords", "text")])
-            self.memory_collection.create_index([("chat_id", 1), ("content_type", 1)])
+            self.memory_collection.create_index([
+                ("chat_id", 1),
+                ("content_type", 1),
+                ("importance_score", -1)
+            ])
             
-            logger.info("✅ Memory collection indexes ensured")
+            self.memory_collection.create_index([
+                ("keywords", 1),
+                ("importance_score", -1)
+            ])
+            
+            self.memory_collection.create_index([
+                ("entities", 1),
+                ("timestamp", -1)
+            ])
+            
+            logger.info("✅ Memory indexes created successfully")
             
         except Exception as e:
-            logger.error(f"Failed to create memory indexes: {e}")
-    
-    def extract_keywords_and_entities(self, text: str) -> Tuple[List[str], List[str]]:
-        """Extract keywords and entities from text using simple NLP"""
-        keywords = []
-        entities = []
-        
-        # Simple keyword extraction
-        words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
-        
-        # Filter out common stop words
-        stop_words = {'the', 'and', 'but', 'for', 'are', 'with', 'this', 'that', 'from', 'they', 'have', 'been', 'was', 'were', 'said', 'each', 'which', 'their', 'time', 'will', 'about', 'can', 'would', 'there', 'what', 'some', 'had', 'them', 'these', 'may', 'like', 'use', 'into', 'than', 'more', 'very', 'when', 'much', 'how', 'where', 'why', 'who'}
-        keywords = [word for word in words if word not in stop_words][:10]
-        
-        # Extract dates, numbers, and monetary values
-        entities.extend(re.findall(r'\b\d{1,2}/\d{1,2}/\d{4}\b', text))  # Dates
-        entities.extend(re.findall(r'\$\d+\.?\d*', text))  # Money
-        entities.extend(re.findall(r'\b\d+\.?\d*', text))
-        
-        # Capitalized words (potential names/places)
-        entities.extend(re.findall(r'\b[A-Z][a-z]+\b', text))
-        
-        # Common business terms
-        business_entities = re.findall(r'\b(revenue|sales|profit|customers?|products?|orders?|analytics?|dashboard|report|chart|graph)\b', text.lower())
-        entities.extend(business_entities)
-        
-        return keywords[:10], list(set(entities))[:15]
-    
-    def calculate_enhanced_importance(self, content: str, content_type: str, context: Dict = None) -> float:
-        """Enhanced importance scoring with multiple factors"""
-        if context is None:
-            context = {}
-            
-        # Base scores (keep your existing logic)
-        base_scores = {
-            'question': 0.7,
-            'answer': 0.8,
-            'preference': 0.9,
-            'fact': 0.6,
-            'context': 0.4
-        }
-        
-        importance = base_scores.get(content_type, 0.5)
-        
-        # ENHANCEMENT: Pattern-based importance boosts
-        try:
-            content_lower = content.lower()
-            
-            # User preferences and needs (HIGH PRIORITY)
-            if re.search(r'\b(prefer|like|want|need|always|never)\b', content_lower):
-                importance += 0.2
-            
-            # Business metrics and KPIs
-            if re.search(r'\b(revenue|profit|sales|growth|performance|trend|compare|versus)\b', content_lower):
-                importance += 0.15
-            
-            # Temporal references (recent context)
-            if re.search(r'\b(yesterday|today|this week|last month|recent|latest)\b', content_lower):
-                importance += 0.1
-            
-            # Specific numbers and dates (concrete data)
-            if re.search(r'\b(\d{4}|\$\d+|\d+%|\d+\.?\d*[KMB]?)\b', content_lower):
-                importance += 0.05
-                
-        except Exception as e:
-            # If pattern matching fails, use base score (SAFE)
-            logger.warning(f"Pattern matching failed for importance scoring: {e}")
-        
-        # ENHANCEMENT: Recency factor
-        try:
-            if context.get('timestamp'):
-                hours_old = (utc_now() - context['timestamp']).total_seconds() / 3600
-                recency_factor = max(0, 1 - (hours_old / 168))  # Decay over a week
-                importance *= (0.7 + 0.3 * recency_factor)
-        except:
-            # If recency calculation fails, skip it (SAFE)
-            pass
-        
-        # ENHANCEMENT: Recent conversation turns bonus
-        try:
-            if context.get('turn') and context['turn'] <= 5:
-                importance += 0.1  # Recent conversation turns are more important
-        except:
-            # If turn calculation fails, skip it (SAFE)
-            pass
-        
-        # Cap at 1.0 and ensure minimum of 0.1
-        return max(0.1, min(1.0, importance))
+            logger.warning(f"Could not create memory indexes: {e}")
     
     async def store_memory(self, chat_id: str, content: str, content_type: str, 
-                          related_to: List[str] = None, context: Dict = None) -> str:
-        """Store a new memory fragment with enhanced importance scoring"""
+                          context: Dict = None, importance_score: float = None) -> str:
+        """
+        Store a memory fragment with enhanced context extraction for GenAI operations
+        """
         try:
-            if context is None:
-                context = {}
-                
-            # Extract keywords and entities
-            keywords, entities = self.extract_keywords_and_entities(content)
-            
-            # Calculate enhanced importance score
-            importance_score = self.calculate_enhanced_importance(content, content_type, context)
-            
             # Generate unique fragment ID
-            fragment_id = f"mem_{chat_id}_{utc_now().timestamp()}_{hashlib.md5(content.encode()).hexdigest()[:8]}"
+            fragment_id = self._generate_fragment_id(chat_id, content)
             
-            memory_doc = {
+            # Extract keywords and entities with GenAI focus
+            keywords = self._extract_keywords(content)
+            entities = self._extract_entities(content)
+            
+            # Calculate importance score
+            if importance_score is None:
+                importance_score = self._calculate_importance_score(content, content_type, context)
+            
+            # Create memory fragment
+            memory_fragment = {
                 "fragment_id": fragment_id,
                 "chat_id": chat_id,
                 "content": content,
@@ -407,142 +421,173 @@ class MemoryRAGManager:
                 "importance_score": importance_score,
                 "keywords": keywords,
                 "entities": entities,
-                "related_fragments": related_to or [],
+                "related_fragments": [],
                 "access_count": 0,
-                "context": context
+                "last_accessed": None,
+                "context": context or {},
+                "domain": self.domain_context["domain"]
             }
             
             # Store in database
-            self.memory_collection.insert_one(memory_doc)
-            
-            logger.info(f"✅ Stored memory fragment: {fragment_id} (importance: {importance_score:.2f})")
+            self.memory_collection.insert_one(memory_fragment)
             
             # Cleanup old memories if needed
-            await self.cleanup_old_memories(chat_id)
+            await self._cleanup_old_memories(chat_id)
             
+            logger.debug(f"📝 Stored memory fragment: {fragment_id}")
             return fragment_id
             
         except Exception as e:
             logger.error(f"Failed to store memory: {e}")
-            return None
+            return ""
     
-    async def retrieve_relevant_memories(self, chat_id: str, query: str, limit: int = 6) -> List[MemoryFragment]:
-        """Retrieve relevant memories for a given query"""
-        try:
-            # Build aggregation pipeline for smart memory retrieval
-            pipeline = [
-                # Match memories for this chat
-                {"$match": {"chat_id": chat_id}},
-                
-                # Add relevance score based on text similarity and importance
-                {
-                    "$addFields": {
-                        "relevance_score": {
-                            "$add": [
-                                "$importance_score",
-                                {
-                                    "$cond": {
-                                        "if": {"$regexMatch": {"input": "$content", "regex": query, "options": "i"}},
-                                        "then": 0.3,
-                                        "else": 0
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                },
-                
-                # Sort by relevance score and recency
-                {"$sort": {"relevance_score": -1, "timestamp": -1}},
-                
-                # Limit results
-                {"$limit": limit}
-            ]
-            
-            results = list(self.memory_collection.aggregate(pipeline))
-            
-            # Convert to MemoryFragment objects
-            memories = []
-            for doc in results:
-                # Update access statistics
-                self.memory_collection.update_one(
-                    {"fragment_id": doc["fragment_id"]},
-                    {
-                        "$inc": {"access_count": 1},
-                        "$set": {"last_accessed": utc_now()}
-                    }
-                )
-                
-                # Create MemoryFragment object
-                memories.append(MemoryFragment(
-                    fragment_id=doc["fragment_id"],
-                    chat_id=doc["chat_id"],
-                    content=doc["content"],
-                    content_type=doc["content_type"],
-                    timestamp=doc["timestamp"],
-                    importance_score=doc["importance_score"],
-                    keywords=doc["keywords"],
-                    entities=doc["entities"],
-                    related_fragments=doc["related_fragments"],
-                    access_count=doc.get("access_count", 0),
-                    last_accessed=doc.get("last_accessed")
-                ))
-            
-            logger.info(f"✅ Retrieved {len(memories)} relevant memories for chat {chat_id}")
-            return memories
-            
-        except Exception as e:
-            logger.error(f"Failed to retrieve memories: {e}")
-            return []
+    def _extract_keywords(self, content: str) -> List[str]:
+        """Extract relevant keywords with focus on GenAI operations"""
+        content_lower = content.lower()
+        
+        # GenAI-specific keywords
+        genai_keywords = [
+            'cost', 'spending', 'token', 'model', 'document', 'extraction',
+            'confidence', 'compliance', 'obligation', 'agent', 'batch',
+            'processing', 'efficiency', 'performance', 'quality', 'risk'
+        ]
+        
+        # Technical terms
+        technical_terms = [
+            'llm', 'ai', 'machine learning', 'nlp', 'api', 'database',
+            'pipeline', 'workflow', 'automation', 'optimization'
+        ]
+        
+        # Business metrics
+        business_metrics = [
+            'revenue', 'profit', 'roi', 'efficiency', 'productivity',
+            'success rate', 'failure rate', 'accuracy', 'precision'
+        ]
+        
+        all_keywords = genai_keywords + technical_terms + business_metrics
+        found_keywords = [kw for kw in all_keywords if kw in content_lower]
+        
+        # Add important phrases
+        important_phrases = re.findall(r'\b(?:high|low|increase|decrease|improve|optimize)\s+\w+', content_lower)
+        found_keywords.extend(important_phrases)
+        
+        return list(set(found_keywords))[:10]  # Limit to top 10
     
-    async def build_conversation_context(self, chat_id: str, current_input: str) -> ConversationContext:
-        """Build rich conversation context with memory"""
+    def _extract_entities(self, content: str) -> List[str]:
+        """Extract entities relevant to GenAI operations"""
+        entities = []
+        
+        # Model names (common AI models)
+        model_patterns = [
+            r'\b(gpt-\d+|claude|gemini|llama|bert|t5)\w*\b',
+            r'\b(openai|anthropic|google|meta|huggingface)\w*\b'
+        ]
+        
+        # Document types
+        doc_patterns = [
+            r'\b(contract|agreement|policy|report|invoice|receipt)\w*\b',
+            r'\b(pdf|docx|txt|json|xml|csv)\b'
+        ]
+        
+        # Business entities
+        business_patterns = [
+            r'\$[\d,]+(?:\.\d{2})?',  # Currency amounts
+            r'\b\d+%\b',  # Percentages
+            r'\b\d+\s*(?:tokens|documents|batches|users)\b'  # Quantities
+        ]
+        
+        all_patterns = model_patterns + doc_patterns + business_patterns
+        
+        for pattern in all_patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            entities.extend(matches)
+        
+        return list(set(entities))[:8]  # Limit to top 8
+    
+    def _calculate_importance_score(self, content: str, content_type: str, context: Dict = None) -> float:
+        """Calculate importance score with GenAI operations focus"""
+        score = 0.5  # Base score
+        
+        # Content type weights
+        type_weights = {
+            'question': 0.7,
+            'answer': 0.8,
+            'insight': 0.9,
+            'preference': 0.6,
+            'fact': 0.7,
+            'error': 0.4
+        }
+        score = type_weights.get(content_type, 0.5)
+        
+        # High-value keywords boost
+        high_value_keywords = [
+            'cost', 'expensive', 'efficient', 'optimize', 'improve',
+            'critical', 'urgent', 'important', 'risk', 'compliance',
+            'failure', 'error', 'success', 'performance'
+        ]
+        
+        content_lower = content.lower()
+        keyword_boost = sum(0.1 for keyword in high_value_keywords if keyword in content_lower)
+        score += min(keyword_boost, 0.3)  # Cap at 0.3 boost
+        
+        # Numerical data boost (specific metrics are valuable)
+        if re.search(r'\d+(?:\.\d+)?[%$]?', content):
+            score += 0.1
+        
+        # Question marks indicate queries (valuable for context)
+        if '?' in content:
+            score += 0.1
+        
+        # Context-based adjustments
+        if context:
+            if context.get('user_initiated'):
+                score += 0.1
+            if context.get('complex_query'):
+                score += 0.15
+        
+        return min(score, 1.0)  # Cap at 1.0
+    
+    def _generate_fragment_id(self, chat_id: str, content: str) -> str:
+        """Generate unique fragment ID"""
+        timestamp = str(int(utc_now().timestamp()))
+        content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+        return f"{chat_id}_{timestamp}_{content_hash}"
+    
+    async def build_conversation_context(self, chat_id: str, current_question: str) -> ConversationContext:
+        """
+        Build rich conversation context for GenAI operations
+        """
         try:
             # Get relevant memories
-            relevant_memories = await self.retrieve_relevant_memories(chat_id, current_input)
+            relevant_memories = await self._get_relevant_memories(chat_id, current_question)
             
-            # Extract user preferences
-            preferences = {}
-            for memory in relevant_memories:
-                if memory.content_type == 'preference':
-                    # Parse preference from content
-                    pref_match = re.search(r'(prefer|like|want|need)\s+([^.]+)', memory.content.lower())
-                    if pref_match:
-                        preferences[pref_match.group(1)] = pref_match.group(2)
+            # Extract conversation themes
+            themes = self._extract_conversation_themes(relevant_memories)
             
-            # Identify conversation themes
-            all_keywords = []
-            for memory in relevant_memories:
-                all_keywords.extend(memory.keywords)
+            # Get user preferences
+            preferences = await self._get_user_preferences(chat_id)
             
-            # Count keyword frequency to identify themes
-            keyword_counts = {}
-            for keyword in all_keywords:
-                keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
+            # Extract recent entities
+            recent_entities = self._get_recent_entities(relevant_memories)
             
-            themes = [k for k, v in sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)[:5]]
+            # Build session context
+            session_context = await self._build_session_context(chat_id, relevant_memories)
             
-            # Get recent entities
-            recent_entities = []
-            for memory in relevant_memories[:5]:  # Most recent/relevant
-                recent_entities.extend(memory.entities)
-            recent_entities = list(set(recent_entities))[:10]
+            # Get current turn number
+            current_turn = await self._get_conversation_turn(chat_id)
             
-            # Get current conversation turn count
-            turn_count = self.memory_collection.count_documents({
-                "chat_id": chat_id,
-                "content_type": {"$in": ["question", "answer"]}
-            })
-            
-            return ConversationContext(
+            context = ConversationContext(
                 chat_id=chat_id,
-                current_turn=turn_count + 1,
+                current_turn=current_turn,
                 relevant_memories=relevant_memories,
                 user_preferences=preferences,
                 conversation_themes=themes,
                 recent_entities=recent_entities,
-                session_context={}
+                session_context=session_context
             )
+            
+            logger.debug(f"📋 Built conversation context: {len(relevant_memories)} memories, {len(themes)} themes")
+            return context
             
         except Exception as e:
             logger.error(f"Failed to build conversation context: {e}")
@@ -556,173 +601,229 @@ class MemoryRAGManager:
                 session_context={}
             )
     
-    def format_memory_context_for_ai(self, context: ConversationContext, max_tokens: int = 4000) -> str:
-        """Enhanced memory context formatter with better token management and timezone safety"""
+    async def _get_relevant_memories(self, chat_id: str, question: str, limit: int = 10) -> List[MemoryFragment]:
+        """Get relevant memories for the current question"""
         try:
-            formatted_parts = []
-            token_estimate = 0
+            # Extract keywords from current question
+            question_keywords = self._extract_keywords(question)
             
-            # Header (always include)
-            header = f"=== CONVERSATION CONTEXT (Turn {context.current_turn}) ==="
-            formatted_parts.append(header)
-            token_estimate += len(header) // 4  # Rough token estimation
-            
-            # Add user preferences (high priority)
-            if context.user_preferences:
-                formatted_parts.append("\n👤 USER PREFERENCES:")
-                for pref_type, pref_value in list(context.user_preferences.items())[:3]:  # Limit to 3
-                    pref_line = f"   - {pref_type}: {pref_value}"
-                    if token_estimate + len(pref_line) // 4 < max_tokens * 0.2:
-                        formatted_parts.append(pref_line)
-                        token_estimate += len(pref_line) // 4
-            
-            # Add conversation themes
-            if context.conversation_themes:
-                themes_line = f"\n🎯 CONVERSATION THEMES: {', '.join(context.conversation_themes[:5])}"
-                if token_estimate + len(themes_line) // 4 < max_tokens * 0.15:
-                    formatted_parts.append(themes_line)
-                    token_estimate += len(themes_line) // 4
-            
-            # Add recent entities
-            if context.recent_entities:
-                entities_line = f"\n🏷️ RECENT ENTITIES: {', '.join(context.recent_entities[:6])}"
-                if token_estimate + len(entities_line) // 4 < max_tokens * 0.15:
-                    formatted_parts.append(entities_line)
-                    token_estimate += len(entities_line) // 4
-            
-            # Add relevant memories (prioritized)
-            if context.relevant_memories:
-                formatted_parts.append("\n📚 RELEVANT MEMORY:")
-                
-                # Sort by recency AND importance (SAFE - won't break existing logic)
-                try:
-                    sorted_memories = sorted(
-                        context.relevant_memories,
-                        key=lambda m: (
-                            getattr(m.timestamp, 'timestamp', lambda: 0)() if hasattr(m.timestamp, 'timestamp') else 0, 
-                            getattr(m, 'importance_score', 0.5)
-                        ),
-                        reverse=True
-                    )
-                except Exception as sort_error:
-                    # Fallback to original order if sorting fails
-                    logger.warning(f"Memory sorting failed, using original order: {sort_error}")
-                    sorted_memories = context.relevant_memories
-                
-                for memory in sorted_memories[:4]:  # Limit to top 4
-                    try:
-                        # TIMEZONE-SAFE age calculation
-                        current_time = utc_now()
-                        memory_time = memory.timestamp
-                        
-                        # Handle timezone mismatch (old vs new memories)
-                        if memory_time.tzinfo is None:
-                            # Old memory without timezone - make it UTC aware
-                            memory_time = memory_time.replace(tzinfo=timezone.utc)
-                        elif current_time.tzinfo is None:
-                            # Current time without timezone - make it UTC aware  
-                            current_time = current_time.replace(tzinfo=timezone.utc)
-                        
-                        # Calculate age safely
-                        try:
-                            age = current_time - memory_time
-                            age_str = f"{age.days}d ago" if age.days > 0 else f"{age.seconds//3600}h ago"
-                        except Exception as age_error:
-                            # Ultimate fallback if age calculation still fails
-                            logger.warning(f"Age calculation failed, using fallback: {age_error}")
-                            age_str = "recent"
-                        
-                        # Smart truncation based on available space
-                        max_content_len = 150 if token_estimate < max_tokens * 0.6 else 100
-                        content = memory.content[:max_content_len] + "..." if len(memory.content) > max_content_len else memory.content
-                        memory_line = f"   [{memory.content_type.upper()}, {age_str}] {content}"
-                        
-                        # Check token limit before adding
-                        if token_estimate + len(memory_line) // 4 > max_tokens * 0.8:
-                            break
-                            
-                        formatted_parts.append(memory_line)
-                        token_estimate += len(memory_line) // 4
-                        
-                    except Exception as memory_error:
-                        # Skip problematic memory, don't break the whole process
-                        logger.warning(f"Skipping memory due to error: {memory_error}")
-                        continue
-            
-            formatted_parts.append("\n=== END CONTEXT ===\n")
-            
-            return '\n'.join(formatted_parts)
-            
-        except Exception as e:
-            logger.error(f"Failed to format memory context: {e}")
-            # SAFE FALLBACK - return basic context if enhancement fails
-            return f"=== CONVERSATION CONTEXT (Turn {context.current_turn}) ===\n[Context loading error: {str(e)}]\n=== END CONTEXT ===\n"
-    
-    async def cleanup_old_memories(self, chat_id: str):
-        """Clean up old or low-importance memories"""
-        try:
-            # Count current memories
-            memory_count = self.memory_collection.count_documents({"chat_id": chat_id})
-            
-            if memory_count > self.max_memory_fragments:
-                # Remove oldest, least important memories
-                old_memories = list(self.memory_collection.find(
-                    {"chat_id": chat_id}
-                ).sort([("importance_score", 1), ("timestamp", 1)]).limit(memory_count - self.max_memory_fragments))
-                
-                memory_ids = [mem["fragment_id"] for mem in old_memories]
-                
-                result = self.memory_collection.delete_many(
-                    {"fragment_id": {"$in": memory_ids}}
-                )
-                
-                logger.info(f"✅ Cleaned up {result.deleted_count} old memories for chat {chat_id}")
-                
-        except Exception as e:
-            logger.error(f"Failed to cleanup memories: {e}")
-    
-    def get_memory_stats(self, chat_id: str) -> Dict[str, Any]:
-        """Get statistics about stored memories for a chat"""
-        try:
-            # Aggregate memory statistics
-            pipeline = [
-                {"$match": {"chat_id": chat_id}},
-                {
-                    "$group": {
-                        "_id": "$content_type",
-                        "count": {"$sum": 1},
-                        "avg_importance": {"$avg": "$importance_score"},
-                        "total_access": {"$sum": "$access_count"}
-                    }
-                }
-            ]
-            
-            stats_by_type = list(self.memory_collection.aggregate(pipeline))
-            
-            total_memories = self.memory_collection.count_documents({"chat_id": chat_id})
-            
-            # Get most accessed memories
-            top_memories = list(self.memory_collection.find(
-                {"chat_id": chat_id},
-                {"content": 1, "access_count": 1, "importance_score": 1}
-            ).sort("access_count", -1).limit(5))
-            
-            return {
-                "total_memories": total_memories,
-                "stats_by_type": {stat["_id"]: stat for stat in stats_by_type},
-                "top_accessed_memories": top_memories,
-                "memory_health": "good" if total_memories < self.max_memory_fragments else "needs_cleanup"
+            # Build query for relevant memories
+            query = {
+                "chat_id": chat_id,
+                "$or": [
+                    {"keywords": {"$in": question_keywords}},
+                    {"content": {"$regex": re.escape(question[:50]), "$options": "i"}},
+                    {"importance_score": {"$gte": 0.7}}
+                ]
             }
             
+            # Get memories sorted by relevance and recency
+            cursor = self.memory_collection.find(query).sort([
+                ("importance_score", -1),
+                ("timestamp", -1)
+            ]).limit(limit)
+            
+            memories = []
+            for doc in cursor:
+                memory = MemoryFragment(
+                    fragment_id=doc["fragment_id"],
+                    chat_id=doc["chat_id"],
+                    content=doc["content"],
+                    content_type=doc["content_type"],
+                    timestamp=doc["timestamp"],
+                    importance_score=doc["importance_score"],
+                    keywords=doc.get("keywords", []),
+                    entities=doc.get("entities", []),
+                    related_fragments=doc.get("related_fragments", []),
+                    access_count=doc.get("access_count", 0),
+                    last_accessed=doc.get("last_accessed")
+                )
+                memories.append(memory)
+            
+            # Update access counts
+            if memories:
+                fragment_ids = [m.fragment_id for m in memories]
+                self.memory_collection.update_many(
+                    {"fragment_id": {"$in": fragment_ids}},
+                    {
+                        "$inc": {"access_count": 1},
+                        "$set": {"last_accessed": utc_now()}
+                    }
+                )
+            
+            return memories
+            
         except Exception as e:
-            logger.error(f"Failed to get memory stats: {e}")
-            return {"error": str(e)}
+            logger.error(f"Failed to get relevant memories: {e}")
+            return []
+    
+    def _extract_conversation_themes(self, memories: List[MemoryFragment]) -> List[str]:
+        """Extract conversation themes from memories"""
+        all_keywords = []
+        for memory in memories:
+            all_keywords.extend(memory.keywords)
+        
+        # Count keyword frequency
+        keyword_counts = {}
+        for keyword in all_keywords:
+            keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
+        
+        # Get top themes
+        themes = sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)
+        return [theme[0] for theme in themes[:5]]
+    
+    async def _get_user_preferences(self, chat_id: str) -> Dict[str, Any]:
+        """Get user preferences from stored memories"""
+        try:
+            cursor = self.memory_collection.find({
+                "chat_id": chat_id,
+                "content_type": "preference"
+            }).sort("timestamp", -1).limit(5)
+            
+            preferences = {}
+            for doc in cursor:
+                content = doc["content"].lower()
+                # Extract preference patterns
+                if "prefer" in content:
+                    pref_match = re.search(r"prefer (\w+)", content)
+                    if pref_match:
+                        preferences["preferred_analysis"] = pref_match.group(1)
+                
+                if "chart" in content:
+                    chart_match = re.search(r"(bar|line|pie|chart)", content)
+                    if chart_match:
+                        preferences["preferred_chart_type"] = chart_match.group(1)
+            
+            return preferences
+            
+        except Exception as e:
+            logger.error(f"Failed to get user preferences: {e}")
+            return {}
+    
+    def _get_recent_entities(self, memories: List[MemoryFragment]) -> List[str]:
+        """Get recently mentioned entities"""
+        all_entities = []
+        for memory in memories[-5:]:  # Last 5 memories
+            all_entities.extend(memory.entities)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        recent_entities = []
+        for entity in all_entities:
+            if entity not in seen:
+                seen.add(entity)
+                recent_entities.append(entity)
+        
+        return recent_entities[:8]
+    
+    async def _build_session_context(self, chat_id: str, memories: List[MemoryFragment]) -> Dict[str, Any]:
+        """Build session-specific context"""
+        context = {
+            "session_start": utc_now().isoformat(),
+            "memory_count": len(memories),
+            "domain": self.domain_context["domain"]
+        }
+        
+        # Add recent analysis types
+        recent_analyses = []
+        for memory in memories[-3:]:
+            if "analysis" in memory.content.lower():
+                recent_analyses.append(memory.content[:50])
+        
+        context["recent_analyses"] = recent_analyses
+        return context
+    
+    async def _get_conversation_turn(self, chat_id: str) -> int:
+        """Get current conversation turn number"""
+        try:
+            count = self.memory_collection.count_documents({
+                "chat_id": chat_id,
+                "content_type": "question"
+            })
+            return count + 1
+        except:
+            return 1
+    
+    async def _cleanup_old_memories(self, chat_id: str):
+        """Cleanup old memories to maintain performance"""
+        try:
+            # Remove memories older than decay period
+            cutoff_date = utc_now() - timedelta(days=self.memory_decay_days)
+            
+            self.memory_collection.delete_many({
+                "chat_id": chat_id,
+                "timestamp": {"$lt": cutoff_date},
+                "importance_score": {"$lt": 0.7}  # Keep important memories longer
+            })
+            
+            # Limit total memories per chat
+            total_count = self.memory_collection.count_documents({"chat_id": chat_id})
+            
+            if total_count > self.max_memory_fragments:
+                # Remove oldest, least important memories
+                excess_count = total_count - self.max_memory_fragments
+                
+                oldest_memories = self.memory_collection.find({
+                    "chat_id": chat_id
+                }).sort([
+                    ("importance_score", 1),
+                    ("timestamp", 1)
+                ]).limit(excess_count)
+                
+                fragment_ids = [doc["fragment_id"] for doc in oldest_memories]
+                
+                self.memory_collection.delete_many({
+                    "fragment_id": {"$in": fragment_ids}
+                })
+                
+                logger.debug(f"🧹 Cleaned up {excess_count} old memories for chat {chat_id}")
+                
+        except Exception as e:
+            logger.warning(f"Memory cleanup failed: {e}")
+    
+    def format_memory_context_for_ai(self, context: ConversationContext) -> str:
+        """
+        Format conversation context for AI processing
+        """
+        context_parts = []
+        
+        # Add domain context
+        context_parts.append(f"DOMAIN: {self.domain_context['domain']}")
+        
+        # Add conversation themes
+        if context.conversation_themes:
+            themes = ", ".join(context.conversation_themes[:3])
+            context_parts.append(f"RECENT TOPICS: {themes}")
+        
+        # Add recent entities
+        if context.recent_entities:
+            entities = ", ".join(context.recent_entities[:5])
+            context_parts.append(f"RECENT ENTITIES: {entities}")
+        
+        # Add relevant memories
+        if context.relevant_memories:
+            memory_snippets = []
+            for memory in context.relevant_memories[:3]:  # Top 3 most relevant
+                snippet = memory.content[:100] + "..." if len(memory.content) > 100 else memory.content
+                memory_snippets.append(f"- {snippet}")
+            
+            context_parts.append("RELEVANT CONTEXT:")
+            context_parts.extend(memory_snippets)
+        
+        # Add user preferences
+        if context.user_preferences:
+            prefs = []
+            for key, value in context.user_preferences.items():
+                prefs.append(f"{key}: {value}")
+            context_parts.append(f"USER PREFERENCES: {', '.join(prefs)}")
+        
+        return "\n".join(context_parts)
 
 
 class MemoryEnhancedProcessor:
     """
-    Enhanced processor that integrates Memory RAG with existing analytics
-    NOW WITH SMART SUGGESTIONS!
+    Enhanced processor that combines base analytics with memory and smart suggestions
+    Optimized for GenAI operations and document intelligence
     """
     
     def __init__(self, base_processor, memory_manager: MemoryRAGManager, gemini_client=None):
@@ -733,7 +834,7 @@ class MemoryEnhancedProcessor:
         self.suggestion_generator = None
         if gemini_client:
             self.suggestion_generator = SmartSuggestionGenerator(gemini_client, memory_manager)
-            logger.info("✅ Smart Suggestion Generator initialized")
+            logger.info("✅ Smart Suggestion Generator initialized for GenAI operations")
     
     async def process_with_memory(self, question: str, chat_id: str) -> Dict[str, Any]:
         """Process question with full memory context AND smart suggestions"""
@@ -746,7 +847,7 @@ class MemoryEnhancedProcessor:
                 chat_id=chat_id,
                 content=question,
                 content_type='question',
-                context={'turn': context.current_turn}
+                context={'turn': context.current_turn, 'user_initiated': True}
             )
             
             # Format memory context for AI
@@ -756,125 +857,274 @@ class MemoryEnhancedProcessor:
             enhanced_question = f"{memory_context}\nUSER QUESTION: {question}"
             
             # Process with base processor (YOUR EXISTING FLOW - UNCHANGED)
-            result = await self.base_processor.process_question(enhanced_question)
+            if hasattr(self.base_processor, 'process_question'):
+                # For analytics processor with async support
+                if asyncio.iscoroutinefunction(self.base_processor.process_question):
+                    result = await self.base_processor.process_question(enhanced_question)
+                else:
+                    result = self.base_processor.process_question(enhanced_question)
+            else:
+                # Fallback for different processor interfaces
+                result = {"success": False, "error": "Processor interface not supported"}
             
             # Store the AI response as memory
             if result.get('success'):
-                response_content = f"Answer: {result.get('summary', '')}"
-                if result.get('insights'):
-                    response_content += f" Insights: {'; '.join(result['insights'])}"
-                
+                response_content = result.get('summary', 'Analysis completed successfully')
                 await self.memory_manager.store_memory(
                     chat_id=chat_id,
                     content=response_content,
                     content_type='answer',
-                    context={'turn': context.current_turn}
+                    context={'turn': context.current_turn, 'success': True}
                 )
                 
-                # Store any discovered facts or preferences
-                await self._extract_and_store_insights(chat_id, question, result)
-            
-            # Add memory context to result
-            result['memory_context'] = {
-                'memories_used': len(context.relevant_memories),
-                'conversation_turn': context.current_turn,
-                'themes': context.conversation_themes,
-                'preferences': context.user_preferences
-            }
-            
-            # 🚀 NEW: Generate smart suggestions in background (non-blocking)
-            if self.suggestion_generator and result.get('success'):
-                try:
-                    # Start suggestion generation task but don't wait for it
-                    suggestion_task = asyncio.create_task(
-                        self.suggestion_generator.generate_smart_suggestions(
-                            chat_id, result, question
+                # Store insights as facts
+                if result.get('insights'):
+                    for insight in result['insights']:
+                        await self.memory_manager.store_memory(
+                            chat_id=chat_id,
+                            content=f"Insight: {insight}",
+                            content_type='fact',
+                            context={'turn': context.current_turn}
                         )
+            
+            # Generate smart suggestions (async in background if possible)
+            if self.suggestion_generator:
+                try:
+                    # Try to generate smart suggestions
+                    smart_suggestions = await self.suggestion_generator.generate_smart_suggestions(
+                        question, result, context.session_context
                     )
                     
-                    # Try to get suggestions quickly, but don't block
-                    try:
-                        smart_suggestions = await asyncio.wait_for(suggestion_task, timeout=2.0)
-                        result['suggested_questions'] = smart_suggestions
-                        logger.info(f"✅ Smart suggestions generated: {len(smart_suggestions)}")
-                    except asyncio.TimeoutError:
-                        # Return default suggestions immediately, let background task continue
-                        result['suggested_questions'] = self.suggestion_generator.get_default_suggestions()
-                        logger.info("⏱️ Using default suggestions (background generation continuing)")
-                        
-                        # Schedule background completion (optional)
-                        asyncio.create_task(self._complete_suggestion_background(suggestion_task, chat_id))
-                        
+                    # Add smart suggestions to result
+                    result['smart_suggestions'] = smart_suggestions
+                    result['suggestions'] = smart_suggestions  # Backward compatibility
+                    
                 except Exception as e:
-                    logger.error(f"❌ Suggestion generation error: {e}")
-                    result['suggested_questions'] = self.suggestion_generator.get_default_suggestions()
+                    logger.warning(f"Smart suggestion generation failed: {e}")
+                    # Fallback to default suggestions
+                    result['suggestions'] = self.suggestion_generator.get_default_suggestions()
             else:
-                # Fallback to default suggestions if no generator available
-                default_suggestions = [
-                    'Show this as a different chart type',
-                    'What are the monthly trends?',
-                    'How does this compare to last year?',
-                    'Show me the top 10 results',
-                    'Break this down by region',
-                    'Analyze the seasonal patterns'
-                ]
-                result['suggested_questions'] = default_suggestions
+                # Use memory-based suggestions if no Gemini
+                result['suggestions'] = self._generate_memory_based_suggestions(context, question)
+            
+            # Add memory context info to result
+            result['memory_context'] = {
+                'relevant_memories_count': len(context.relevant_memories),
+                'conversation_themes': context.conversation_themes,
+                'turn_number': context.current_turn,
+                'has_preferences': bool(context.user_preferences)
+            }
             
             return result
             
         except Exception as e:
             logger.error(f"Memory-enhanced processing failed: {e}")
-            # Fallback to base processor
-            result = await self.base_processor.process_question(question)
             
-            # Add default suggestions even in fallback
-            result['suggested_questions'] = [
-                'Show this as a different chart type',
-                'What are the monthly trends?',
-                'How does this compare to last year?'
-            ]
-            
-            return result
-    
-    async def _complete_suggestion_background(self, suggestion_task, chat_id):
-        """Complete suggestion generation in background and optionally store"""
-        try:
-            smart_suggestions = await suggestion_task
-            logger.info(f"🔥 Background suggestion generation completed for chat {chat_id}")
-            # Could store these for future use or send via websocket if implemented
-        except Exception as e:
-            logger.error(f"Background suggestion completion failed: {e}")
-    
-    async def _extract_and_store_insights(self, chat_id: str, question: str, result: Dict):
-        """Extract and store insights as memories"""
-        try:
-            # Store user preferences mentioned in questions
-            preference_patterns = [
-                r"i (prefer|like|want|need) (.+?)(?:\.|$)",
-                r"(always|never) (.+?)(?:\.|$)",
-                r"my favorite (.+?) is (.+?)(?:\.|$)"
-            ]
-            
-            question_lower = question.lower()
-            for pattern in preference_patterns:
-                matches = re.findall(pattern, question_lower)
-                for match in matches:
-                    preference_content = f"User {match[0]}s {match[1]}"
-                    await self.memory_manager.store_memory(
-                        chat_id=chat_id,
-                        content=preference_content,
-                        content_type='preference'
-                    )
-            
-            # Store important facts from results
-            if result.get('insights'):
-                for insight in result['insights']:
-                    if len(insight.strip()) > 20:  # Only meaningful insights
-                        await self.memory_manager.store_memory(
-                            chat_id=chat_id,
-                            content=f"Fact: {insight}",
-                            content_type='fact'
-                        )
+            # Fallback to base processor without memory
+            try:
+                if hasattr(self.base_processor, 'process_question'):
+                    if asyncio.iscoroutinefunction(self.base_processor.process_question):
+                        result = await self.base_processor.process_question(question)
+                    else:
+                        result = self.base_processor.process_question(question)
                     
+                    # Add basic suggestions
+                    if self.suggestion_generator:
+                        result['suggestions'] = self.suggestion_generator.get_default_suggestions()
+                    
+                    return result
+                else:
+                    return {"success": False, "error": f"Processing failed: {str(e)}"}
+                    
+            except Exception as fallback_error:
+                logger.error(f"Fallback processing also failed: {fallback_error}")
+                return {"success": False, "error": "Complete processing failure"}
+    
+    def _generate_memory_based_suggestions(self, context: ConversationContext, question: str) -> List[str]:
+        """Generate suggestions based on memory context when Gemini is not available"""
+        suggestions = []
+        
+        # Theme-based suggestions
+        for theme in context.conversation_themes[:2]:
+            if theme in ['cost', 'spending']:
+                suggestions.append(f"Show me more details about {theme} optimization")
+            elif theme in ['document', 'extraction']:
+                suggestions.append(f"Analyze {theme} processing trends")
+            elif theme in ['compliance', 'obligation']:
+                suggestions.append(f"Review {theme} risk assessment")
+        
+        # Entity-based suggestions
+        for entity in context.recent_entities[:2]:
+            if '$' in entity:  # Currency amount
+                suggestions.append(f"Compare costs with {entity} as baseline")
+            elif '%' in entity:  # Percentage
+                suggestions.append(f"Show breakdown of the {entity} metric")
+        
+        # Default GenAI suggestions if none generated
+        if not suggestions:
+            suggestions = [
+                "What are our current AI operational costs?",
+                "Show me document processing efficiency",
+                "Which compliance items need attention?",
+                "How are our systems performing today?"
+            ]
+        
+        return suggestions[:5]
+    
+    async def get_conversation_summary(self, chat_id: str) -> Dict[str, Any]:
+        """Get comprehensive conversation summary with memory insights"""
+        try:
+            context = await self.memory_manager.build_conversation_context(chat_id, "")
+            
+            # Get memory statistics
+            memory_stats = await self._get_memory_statistics(chat_id)
+            
+            # Build comprehensive summary
+            summary = {
+                "chat_id": chat_id,
+                "total_turns": context.current_turn,
+                "conversation_themes": context.conversation_themes,
+                "recent_entities": context.recent_entities,
+                "user_preferences": context.user_preferences,
+                "memory_stats": memory_stats,
+                "domain": "AI Operations & Document Intelligence",
+                "last_active": utc_now().isoformat()
+            }
+            
+            return summary
+            
         except Exception as e:
-            logger.error(f"Failed to extract insights: {e}")
+            logger.error(f"Failed to get conversation summary: {e}")
+            return {"chat_id": chat_id, "error": str(e)}
+    
+    async def _get_memory_statistics(self, chat_id: str) -> Dict[str, Any]:
+        """Get statistics about stored memories"""
+        try:
+            total_memories = self.memory_manager.memory_collection.count_documents({
+                "chat_id": chat_id
+            })
+            
+            # Get memory types breakdown
+            pipeline = [
+                {"$match": {"chat_id": chat_id}},
+                {"$group": {
+                    "_id": "$content_type",
+                    "count": {"$sum": 1},
+                    "avg_importance": {"$avg": "$importance_score"}
+                }}
+            ]
+            
+            type_stats = {}
+            for doc in self.memory_manager.memory_collection.aggregate(pipeline):
+                type_stats[doc["_id"]] = {
+                    "count": doc["count"],
+                    "avg_importance": round(doc["avg_importance"], 2)
+                }
+            
+            return {
+                "total_memories": total_memories,
+                "memory_types": type_stats,
+                "retention_days": self.memory_manager.memory_decay_days
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get memory statistics: {e}")
+            return {"total_memories": 0}
+    
+    async def reset_conversation_memory(self, chat_id: str) -> bool:
+        """Reset all memory for a conversation"""
+        try:
+            result = self.memory_manager.memory_collection.delete_many({
+                "chat_id": chat_id
+            })
+            
+            logger.info(f"🔄 Reset {result.deleted_count} memories for chat {chat_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to reset conversation memory: {e}")
+            return False
+    
+    async def export_conversation_memory(self, chat_id: str) -> Dict[str, Any]:
+        """Export conversation memory for analysis or backup"""
+        try:
+            memories = []
+            cursor = self.memory_manager.memory_collection.find({
+                "chat_id": chat_id
+            }).sort("timestamp", 1)
+            
+            for doc in cursor:
+                # Clean up document for export
+                memory = {
+                    "fragment_id": doc["fragment_id"],
+                    "content": doc["content"],
+                    "content_type": doc["content_type"],
+                    "timestamp": doc["timestamp"].isoformat(),
+                    "importance_score": doc["importance_score"],
+                    "keywords": doc.get("keywords", []),
+                    "entities": doc.get("entities", []),
+                    "access_count": doc.get("access_count", 0)
+                }
+                memories.append(memory)
+            
+            return {
+                "chat_id": chat_id,
+                "export_timestamp": utc_now().isoformat(),
+                "total_memories": len(memories),
+                "memories": memories
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to export conversation memory: {e}")
+            return {"chat_id": chat_id, "error": str(e)}
+
+
+# Utility functions for memory management
+def clean_memory_content(content: str) -> str:
+    """Clean and normalize memory content"""
+    # Remove excessive whitespace
+    content = re.sub(r'\s+', ' ', content.strip())
+    
+    # Remove special characters that might cause issues
+    content = re.sub(r'[^\w\s\.\?\!\,\:\;\-\$\%\(\)]', '', content)
+    
+    # Limit length
+    if len(content) > 1000:
+        content = content[:997] + "..."
+    
+    return content
+
+def extract_numerical_insights(content: str) -> List[str]:
+    """Extract numerical insights from content"""
+    insights = []
+    
+    # Currency amounts
+    currency_matches = re.findall(r'\$[\d,]+(?:\.\d{2})?', content)
+    for match in currency_matches:
+        insights.append(f"Amount mentioned: {match}")
+    
+    # Percentages
+    percentage_matches = re.findall(r'\d+(?:\.\d+)?%', content)
+    for match in percentage_matches:
+        insights.append(f"Percentage mentioned: {match}")
+    
+    # Counts
+    count_matches = re.findall(r'\b\d+\s*(?:documents|batches|users|items|records)\b', content, re.IGNORECASE)
+    for match in count_matches:
+        insights.append(f"Count mentioned: {match}")
+    
+    return insights
+
+def calculate_content_similarity(content1: str, content2: str) -> float:
+    """Calculate similarity between two pieces of content"""
+    # Simple keyword-based similarity
+    words1 = set(content1.lower().split())
+    words2 = set(content2.lower().split())
+    
+    if not words1 or not words2:
+        return 0.0
+    
+    intersection = words1.intersection(words2)
+    union = words1.union(words2)
+    
+    return len(intersection) / len(union) if union else 0.0
