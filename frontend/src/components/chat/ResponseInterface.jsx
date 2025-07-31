@@ -301,37 +301,83 @@ This response maintains compatibility with your existing backend infrastructure.
 
   // Chart Display Component
   const ChartDisplay = ({ chartData }) => {
-    if (!chartData || !chartData.data) return null;
+    if (!chartData) {
+      return (
+        <div className="text-center text-gray-500 py-8">
+          <div className="text-4xl mb-2">📊</div>
+          <p>No chart data available</p>
+        </div>
+      );
+    }
 
-    const { labels, datasets } = chartData.data;
-    const data = datasets[0]?.data || [];
-    const maxValue = Math.max(...data.filter(val => typeof val === 'number'));
-    const chartType = chartData.type || 'bar';
+    // Handle both direct data and nested data structures
+    let chartDataObj = {};
+    if (chartData.data) {
+      chartDataObj = chartData.data;
+    } else if (chartData.labels || chartData.datasets) {
+      chartDataObj = chartData;
+    } else {
+      return (
+        <div className="text-center text-gray-500 py-8">
+          <div className="text-4xl mb-2">⚠️</div>
+          <p>Invalid chart data format</p>
+        </div>
+      );
+    }
 
-    const renderBarChart = () => (
-      <div className="space-y-3">
-        {labels.map((label, index) => (
-          <div key={index} className="flex items-center space-x-3">
-            <div className="w-32 text-sm text-gray-700 font-medium truncate" title={label}>
-              {label}
-            </div>
-            <div className="flex-1 bg-gray-200 rounded-full h-8 relative">
-              <div
-                className="bg-blue-500 h-8 rounded-full flex items-center justify-end pr-3 transition-all duration-500 ease-out"
-                style={{ width: `${maxValue > 0 ? (data[index] / maxValue) * 100 : 0}%` }}
-              >
-                <span className="text-white text-xs font-medium">
-                  {typeof data[index] === 'number' ? data[index].toLocaleString() : data[index]}
-                </span>
+    // Defensive data extraction with fallbacks
+    const labels = chartDataObj.labels || [];
+    const datasets = chartDataObj.datasets || [];
+    const data = datasets.length > 0 ? (datasets[0]?.data || []) : [];
+    
+    // Safety check for maxValue calculation
+    const numericData = data.filter(val => typeof val === 'number' && !isNaN(val));
+    const maxValue = numericData.length > 0 ? Math.max(...numericData) : 0;
+    const chartType = chartData.type || chartData.chartType || 'bar';
+
+    const renderBarChart = () => {
+      if (labels.length === 0 || data.length === 0) {
+        return <div className="text-center text-gray-500 py-8">No data available for chart</div>;
+      }
+      
+      return (
+        <div className="space-y-3">
+          {labels.map((label, index) => {
+            const dataValue = data[index] !== undefined ? data[index] : 0;
+            const numericValue = typeof dataValue === 'number' ? dataValue : 0;
+            
+            return (
+              <div key={index} className="flex items-center space-x-3">
+                <div className="w-32 text-sm text-gray-700 font-medium truncate" title={label}>
+                  {label}
+                </div>
+                <div className="flex-1 bg-gray-200 rounded-full h-8 relative">
+                  <div
+                    className="bg-blue-500 h-8 rounded-full flex items-center justify-end pr-3 transition-all duration-500 ease-out"
+                    style={{ width: `${maxValue > 0 ? (numericValue / maxValue) * 100 : 0}%` }}
+                  >
+                    <span className="text-white text-xs font-medium">
+                      {typeof dataValue === 'number' ? dataValue.toLocaleString() : dataValue}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
+            );
+          })}
+        </div>
+      );
+    };
 
     const renderPieChart = () => {
+      if (labels.length === 0 || data.length === 0) {
+        return <div className="text-center text-gray-500 py-8">No data available for pie chart</div>;
+      }
+      
       const total = data.reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
+      if (total === 0) {
+        return <div className="text-center text-gray-500 py-8">No valid numeric data for pie chart</div>;
+      }
+      
       let currentAngle = 0;
       const radius = 80;
       const center = radius + 10;
@@ -340,8 +386,9 @@ This response maintains compatibility with your existing backend infrastructure.
         <div className="flex items-center justify-center">
           <svg width={center * 2} height={center * 2} className="drop-shadow-sm">
             {data.map((value, index) => {
-              const percentage = (value / total) * 100;
-              const angle = (value / total) * 360;
+              const numericValue = typeof value === 'number' ? value : 0;
+              const percentage = (numericValue / total) * 100;
+              const angle = (numericValue / total) * 360;
               const x1 = center + radius * Math.cos((currentAngle - 90) * Math.PI / 180);
               const y1 = center + radius * Math.sin((currentAngle - 90) * Math.PI / 180);
               const x2 = center + radius * Math.cos((currentAngle + angle - 90) * Math.PI / 180);
@@ -378,7 +425,15 @@ This response maintains compatibility with your existing backend infrastructure.
     };
 
     const renderDoughnutChart = () => {
+      if (labels.length === 0 || data.length === 0) {
+        return <div className="text-center text-gray-500 py-8">No data available for doughnut chart</div>;
+      }
+      
       const total = data.reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
+      if (total === 0) {
+        return <div className="text-center text-gray-500 py-8">No valid numeric data for doughnut chart</div>;
+      }
+      
       let currentAngle = 0;
       const outerRadius = 80;
       const innerRadius = 45;
@@ -388,8 +443,9 @@ This response maintains compatibility with your existing backend infrastructure.
         <div className="flex items-center justify-center">
           <svg width={center * 2} height={center * 2} className="drop-shadow-sm">
             {data.map((value, index) => {
-              const percentage = (value / total) * 100;
-              const angle = (value / total) * 360;
+              const numericValue = typeof value === 'number' ? value : 0;
+              const percentage = (numericValue / total) * 100;
+              const angle = (numericValue / total) * 360;
               
               const x1Outer = center + outerRadius * Math.cos((currentAngle - 90) * Math.PI / 180);
               const y1Outer = center + outerRadius * Math.sin((currentAngle - 90) * Math.PI / 180);
@@ -430,17 +486,144 @@ This response maintains compatibility with your existing backend infrastructure.
       );
     };
 
+    const renderTable = () => {
+      const tableData = chartData.tableData || [];
+      const columns = chartData.columns || [];
+      
+      
+      // If no specific table data, convert chart data to table format
+      if (tableData.length === 0 && labels && data) {
+        const convertedData = labels.map((label, index) => ({
+          category: label,
+          value: data[index],
+          percentage: data.length > 0 ? ((data[index] / data.reduce((a, b) => a + b, 0)) * 100).toFixed(1) + '%' : '0%'
+        }));
+        return renderDataTable(convertedData, [
+          { key: 'category', label: 'Category', width: '40%' },
+          { key: 'value', label: 'Value', width: '30%', align: 'right' },
+          { key: 'percentage', label: 'Percentage', width: '30%', align: 'right' }
+        ]);
+      }
+      
+      return renderDataTable(tableData, columns);
+    };
+
+    const renderDataTable = (data, columns) => {
+      if (!data || data.length === 0) {
+        return (
+          <div className="text-center py-8 text-gray-500">
+            <div className="text-6xl mb-4">📊</div>
+            <p className="font-medium">No data available</p>
+          </div>
+        );
+      }
+
+      return (
+        <div className="w-full">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  {columns.map((column, index) => (
+                    <th
+                      key={column.key || index}
+                      className={`px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${
+                        column.align === 'right' ? 'text-right' : 
+                        column.align === 'center' ? 'text-center' : 'text-left'
+                      }`}
+                      style={{ width: column.width || 'auto' }}
+                    >
+                      {column.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {data.map((row, rowIndex) => (
+                  <tr 
+                    key={rowIndex} 
+                    className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
+                  >
+                    {columns.map((column, colIndex) => (
+                      <td
+                        key={colIndex}
+                        className={`px-6 py-4 whitespace-nowrap text-sm ${
+                          column.align === 'right' ? 'text-right text-gray-900' : 
+                          column.align === 'center' ? 'text-center text-gray-900' : 'text-left text-gray-900'
+                        }`}
+                      >
+                        {formatTableValue(row[column.key], column.type)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          
+          {/* Table summary */}
+          <div className="mt-4 px-6 py-3 bg-gray-50 border-t border-gray-200 rounded-b-lg">
+            <div className="flex justify-between items-center text-sm text-gray-600">
+              <span>Showing {data.length} records</span>
+              <span>
+                {data.length > 0 && columns.some(col => col.type === 'number') && (
+                  <>
+                    Total: {columns
+                      .filter(col => col.type === 'number')
+                      .map(col => {
+                        const sum = data.reduce((acc, row) => {
+                          const val = parseFloat(row[col.key]) || 0;
+                          return acc + val;
+                        }, 0);
+                        return `${col.label}: ${sum.toLocaleString()}`;
+                      })
+                      .join(', ')
+                    }
+                  </>
+                )}
+              </span>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const formatTableValue = (value, type) => {
+      if (value === null || value === undefined) return '-';
+      
+      switch (type) {
+        case 'number':
+          return typeof value === 'number' ? value.toLocaleString() : value;
+        case 'currency':
+          return typeof value === 'number' ? `$${value.toLocaleString()}` : value;
+        case 'percentage':
+          return typeof value === 'number' ? `${value.toFixed(1)}%` : value;
+        case 'date':
+          return new Date(value).toLocaleDateString();
+        default:
+          return String(value);
+      }
+    };
+
     const renderLineChart = () => {
-    const chartWidth = 800;
-    const chartHeight = 500;
-    const padding = { top: 60, right: 60, bottom: 80, left: 80 };
-    const plotWidth = chartWidth - padding.left - padding.right;
-    const plotHeight = chartHeight - padding.top - padding.bottom;
-    
-    // Calculate data ranges
-    const numericData = data.filter(val => typeof val === 'number');
-    const maxValue = Math.max(...numericData);
-    const minValue = Math.min(...numericData);
+      if (labels.length === 0 || data.length === 0) {
+        return <div className="text-center text-gray-500 py-8">No data available for line chart</div>;
+      }
+      
+      const chartWidth = 800;
+      const chartHeight = 500;
+      const padding = { top: 60, right: 60, bottom: 80, left: 80 };
+      const plotWidth = chartWidth - padding.left - padding.right;
+      const plotHeight = chartHeight - padding.top - padding.bottom;
+      
+      // Calculate data ranges with safety checks
+      const numericData = data.filter(val => typeof val === 'number' && !isNaN(val));
+      if (numericData.length === 0) {
+        return <div className="text-center text-gray-500 py-8">No valid numeric data for line chart</div>;
+      }
+      
+      const maxValue = Math.max(...numericData);
+      const minValue = Math.min(...numericData);
     const range = maxValue - minValue || 1;
     const yAxisMax = maxValue + (range * 0.1);
     const yAxisMin = Math.max(0, minValue - (range * 0.1));
@@ -450,11 +633,13 @@ This response maintains compatibility with your existing backend infrastructure.
     const gridLines = 8;
     const yStep = adjustedRange / gridLines;
     
-    // Calculate points for the line
+    // Calculate points for the line with safety checks
     const linePoints = data.map((value, index) => {
+      const numericValue = typeof value === 'number' ? value : 0;
       const x = padding.left + (index * plotWidth) / Math.max(data.length - 1, 1);
-      const y = padding.top + plotHeight - ((value - yAxisMin) / adjustedRange) * plotHeight;
-      return { x, y, value, label: labels[index] };
+      const y = padding.top + plotHeight - ((numericValue - yAxisMin) / adjustedRange) * plotHeight;
+      const label = labels[index] !== undefined ? labels[index] : `Point ${index + 1}`;
+      return { x, y, value: numericValue, label };
     });
 
     // Create smooth curve path
@@ -794,6 +979,7 @@ This response maintains compatibility with your existing backend infrastructure.
         case 'pie': return <PieChart className="h-5 w-5" />;
         case 'doughnut': return <div className="h-5 w-5 border-2 border-current rounded-full relative"><div className="absolute inset-1 border border-current rounded-full"></div></div>;
         case 'line': return <TrendingUp className="h-5 w-5" />;
+        case 'table': return <div className="h-5 w-5 grid grid-cols-2 gap-0.5"><div className="bg-current"></div><div className="bg-current"></div><div className="bg-current"></div><div className="bg-current"></div></div>;
         case 'bar': default: return <BarChart3 className="h-5 w-5" />;
       }
     };
@@ -803,6 +989,7 @@ This response maintains compatibility with your existing backend infrastructure.
         case 'pie': return renderPieChart();
         case 'doughnut': return renderDoughnutChart();
         case 'line': return renderLineChart();
+        case 'table': return renderTable();
         case 'bar': default: return renderBarChart();
       }
     };

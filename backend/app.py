@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pymongo
 import json
 import google.generativeai as genai
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import re
 import time
 from bson import ObjectId
@@ -393,7 +393,7 @@ class BulletproofGeminiClient:
                     if parsed_result:
                         logger.info(f"✅ JSON extraction successful: {list(parsed_result.keys())}")
                         
-                        if self._validate_and_fix_visualization_response(parsed_result, raw_data):
+                        if self._validate_and_fix_visualization_response(parsed_result, raw_data, user_question):
                             logger.info(f"✅ Gemini visualization generation successful on attempt {attempt + 1}")
                             return {"success": True, "data": parsed_result}
                         else:
@@ -417,88 +417,157 @@ class BulletproofGeminiClient:
     
     def _build_enhanced_query_prompt(self, user_question: str, schema_info: Dict) -> str:
         """Build comprehensive prompt with many examples"""
-        return f"""You are an expert MongoDB query generator. Convert natural language questions to perfect MongoDB aggregation pipelines.
+        return f"""You are a MongoDB aggregation expert specializing in AI Operations & Document Intelligence analytics.
 
 USER QUESTION: "{user_question}"
 
-DATABASE SCHEMA:
-{json.dumps(schema_info, indent=2)}
+AVAILABLE COLLECTIONS & KEY FIELDS:
+- costevalutionforllm: _id, batchId, userId, modelType, operationType, inputTokens, outputTokens, totalCost, timestamp
+- documentextractions: _id, Value, Type, Name, Confidence_Score, Status, batchId, fileId  
+- obligationextractions: _id, name, description, obligationType, confidence, category, severity
+- agent_activity: _id, Agent, Contract_Name, Outcome, Timestamp, duration
+- batches: _id, batchId, batchType, status, totalItems, processedItems, failedItems
+- users: _id, userId, emailId, name, role, createdAt
+- conversations: _id, conversationId, userId, title, messages, createdAt
 
-CRITICAL REQUIREMENTS:
-1. Return ONLY valid JSON - no markdown, no explanations, no extra text
-2. Use exact field names from schema
-3. Create efficient aggregation pipelines
-4. Always include $sort and $limit for performance
-5. Choose appropriate chart type based on question
+QUERY PATTERN EXAMPLES:
+1. SIMPLE LISTS: "Show all prompts" → [{{"$limit": 50}}]
+2. COUNTS: "Count total users" → [{{"$group": {{"_id": null, "count": {{"$sum": 1}}}}}}]
+3. TOTALS: "Total cost" → [{{"$group": {{"_id": null, "total": {{"$sum": "$totalCost"}}}}}}]
+4. GROUPING: "By Agent" → [{{"$group": {{"_id": "$Agent", "count": {{"$sum": 1}}}}}}, {{"$sort": {{"count": -1}}}}]
+5. FILTERING: "Confidence > 0.8" → [{{"$match": {{"Confidence_Score": {{"$gt": 0.8}}}}}}, {{"$limit": 50}}]
+6. TOP N: "Top 5 batches" → [{{"$sort": {{"totalItems": -1}}}}, {{"$limit": 5}}]
+7. RANGE QUERIES: "Created after Jan 2025" → [{{"$match": {{"createdAt": {{"$gte": "2025-01-01T00:00:00Z"}}}}}}, {{"$limit": 50}}]
+8. TIME SERIES: "Costs over time" → [{{"$group": {{"_id": {{"$dateToString": {{"format": "%Y-%m-%d", "date": "$timestamp"}}}}, "totalCost": {{"$sum": "$totalCost"}}}}}}, {{"$sort": {{"_id": 1}}}}]
+9. MONTHLY TRENDS: "Monthly trends" → [{{"$group": {{"_id": {{"$dateToString": {{"format": "%Y-%m", "date": "$timestamp"}}}}, "count": {{"$sum": 1}}}}}}, {{"$sort": {{"_id": 1}}}}]
+10. COMPLEX GROUP: "Cost by model type" → [{{"$group": {{"_id": "$modelType", "totalCost": {{"$sum": "$totalCost"}}, "count": {{"$sum": 1}}}}}}, {{"$sort": {{"totalCost": -1}}}}]
 
-RESPONSE FORMAT (JSON only):
+QUANTITY HANDLING:
+- "Show 7 document extractions" = Use [{{"$limit": 7}}]  
+- "Sample of 10 users" = Use [{{"$limit": 10}}]
+- "First 5 batches" = Use [{{"$limit": 5}}]
+- Always respect specific numbers in user requests
+
+CRITICAL RULES:
+- Return ONLY valid JSON, no markdown or explanations
+- Use exact field names shown above (case-sensitive)
+- When user specifies a number, use $limit with that exact number
+- Always add {{"$limit": 100}} for lists, {{"$limit": 20}} for groups
+- Sort by meaningful fields (cost DESC, count DESC, timestamp DESC)
+- Choose collection based on question keywords:
+  * "cost|spending|token" → costevalutionforllm
+  * "document|extraction|confidence" → documentextractions  
+  * "obligation|compliance|legal" → obligationextractions
+  * "agent|activity|outcome" → agent_activity
+  * "batch|processing" → batches
+  * "user|account" → users
+  * "conversation|chat" → conversations
+
+RESPONSE FORMAT:
 {{
-  "collection": "costevalutionforllm|documentextractions|obligationextractions|agent_activity",
-  "pipeline": [
-    {{"$match": {{"condition": "value"}}}},
-    {{"$group": {{"_id": "$field", "metric": {{"$sum": "$value"}}}}}},
-    {{"$sort": {{"metric": -1}}}},
-    {{"$limit": 10}}
-  ],
-  "chart_hint": "bar|pie|line|doughnut",
-  "query_intent": "Description of what this query achieves"
+  "collection": "exact_collection_name",
+  "pipeline": [mongodb_aggregation_stages],
+  "chart_hint": "bar|pie|line|doughnut|table",
+  "query_intent": "brief_description"
 }}
 
-JSON only - no other text:"""
+JSON only:"""
 
     def _build_enhanced_visualization_prompt(self, user_question: str, raw_data: List[Dict], query_context: Dict) -> str:
         """Improved visualization prompt with better instructions"""
         sample_data = raw_data[:3] if raw_data else []
         
-        return f"""You are an expert data visualization specialist. Create perfect Chart.js configurations.
+        # Extract data structure info
+        data_fields = []
+        if raw_data:
+            first_record = raw_data[0]
+            data_fields = [k for k, v in first_record.items() if isinstance(v, (int, float))]
+        
+        return f"""You are an AI Operations visualization expert. Create Chart.js configs for business intelligence.
 
 USER QUESTION: "{user_question}"
-DATA SAMPLE: {json.dumps(sample_data, indent=2)}
-TOTAL RECORDS: {len(raw_data)}
-QUERY CONTEXT: {json.dumps(query_context, indent=2)}
+DATA RECORDS: {len(raw_data)}
+SAMPLE DATA: {json.dumps(sample_data, indent=2)}
 
-CRITICAL REQUIREMENTS:
-1. Return ONLY valid JSON - no markdown, no explanations, no extra text
-2. Always include ALL required fields: chart_type, chart_config, summary, insights, recommendations
-3. Make chart_config a complete, working Chart.js configuration
-4. Ensure all JSON is properly formatted with correct quotes and brackets
+DATA ANALYSIS:
+- Numeric fields available: {data_fields}
+- Collection: {query_context.get('collection', 'unknown')}
+- Query intent: {query_context.get('query_intent', 'unknown')}
 
-REQUIRED JSON STRUCTURE:
+CHART TYPE SELECTION RULES:
+- Time series (dates/timestamps) → line chart
+- Percentages/distributions/breakdowns → pie chart
+- Parts of whole (with %), compositions → doughnut chart  
+- Rankings/comparisons/counts → bar chart
+- Raw data lists → table
+- Single metrics → table with summary
+
+CHART TYPE KEYWORDS:
+- LINE: "over time", "trends", "daily", "monthly", "timeline", "history", "chronological", "time series"
+- PIE: "percentage", "distribution", "breakdown", "composition", "what percent", "proportion", "share"  
+- DOUGHNUT: "parts of", "share of", "portion of", "makeup", "constitution"
+- BAR: "top", "compare", "rank", "most", "least", "count", "versus", "highest", "lowest"
+- TABLE: "show all", "list", "display", "raw data", "details", "records", "entries"
+
+🚨 CRITICAL CHART TYPE RULES - FOLLOW EXACTLY OR FAIL:
+1. "show all", "list all", "display all", "get all" = chart_type MUST BE "table" 
+2. "show me all", "list me all", "display me all" = chart_type MUST BE "table"
+3. "table", "raw data", "details", "records", "entries" = chart_type MUST BE "table"
+4. "in a table", "as a table", "table format" = chart_type MUST BE "table"
+5. Time trends = "line", Percentages = "pie", Comparisons = "bar"
+6. NEVER EVER use "bar" for listing/showing records - ALWAYS use "table"
+
+⚠️ WARNING: If user wants to see records/data, chart_type = "table" ALWAYS
+
+VISUALIZATION REQUIREMENTS:
+1. Return ONLY valid JSON - no explanations or markdown
+2. Extract labels from "_id" field, values from numeric fields
+3. Use professional color scheme for business dashboards
+4. Include actionable insights with specific numbers
+5. Add recommendations for AI operations optimization
+
+RESPONSE FORMAT:
 {{
-  "chart_type": "bar",
+  "chart_type": "bar|pie|line|doughnut|table",
   "chart_config": {{
-    "type": "bar",
+    "type": "chart_type_here",
     "data": {{
-      "labels": ["Label1", "Label2"],
+      "labels": [extract_from_data_id_field],
       "datasets": [{{
-        "label": "Dataset Name", 
-        "data": [100, 200],
-        "backgroundColor": "rgba(59, 130, 246, 0.8)",
-        "borderColor": "rgba(59, 130, 246, 1)",
-        "borderWidth": 2
+        "label": "meaningful_label",
+        "data": [extract_numeric_values],
+        "backgroundColor": ["#3B82F6", "#10B981", "#F59E0B", "#EF4444"],
+        "borderWidth": 1
       }}]
     }},
     "options": {{
       "responsive": true,
-      "maintainAspectRatio": false,
       "plugins": {{
-        "title": {{"display": true, "text": "Chart Title"}},
-        "legend": {{"display": false}}
-      }},
-      "scales": {{
-        "y": {{"beginAtZero": true}},
-        "x": {{"display": true}}
+        "title": {{"display": true, "text": "Descriptive Chart Title"}},
+        "legend": {{"display": true, "position": "bottom"}}
       }}
-    }}
+    }},
+    "tableData": [for_table_type_include_raw_records],
+    "columns": [for_table_type_define_column_structure]
   }},
-  "summary": "Clear summary with specific numbers and insights",
+  "summary": "Found {len(raw_data)} records. Key metric: [specific number and insight]",
+  
+  FOR TABLE TYPE - INCLUDE THESE FIELDS:
+  "tableData": [raw_data_records_with_cleaned_field_names],
+  "columns": [
+    {{"key": "userId", "label": "User ID", "type": "text", "width": "25%", "align": "left"}},
+    {{"key": "emailId", "label": "Email", "type": "text", "width": "30%", "align": "left"}},
+    {{"key": "role", "label": "Role", "type": "text", "width": "20%", "align": "left"}},
+    {{"key": "createdAt", "label": "Created", "type": "date", "width": "25%", "align": "left"}}
+  ],
   "insights": [
-    "Specific insight with data",
-    "Another meaningful insight"
+    "Data-driven insight with numbers",
+    "Pattern or trend identified",
+    "Performance comparison or ranking"
   ],
   "recommendations": [
-    "Actionable recommendation",
-    "Strategic suggestion"
+    "Actionable AI operations improvement",
+    "Cost optimization or efficiency suggestion"
   ]
 }}
 
@@ -638,10 +707,43 @@ JSON only:"""
             logger.error(f"Query validation error: {e}")
             return False
     
-    def _validate_and_fix_visualization_response(self, data: Dict, raw_data: List[Dict]) -> bool:
+    def _validate_and_fix_visualization_response(self, data: Dict, raw_data: List[Dict], user_question: str = "") -> bool:
         """Enhanced validation with auto-fixing and logging"""
         try:
             logger.info(f"🔍 Validating visualization response: {list(data.keys())}")
+            
+            # Check if user explicitly requested table format
+            table_keywords = ['table', 'raw data', 'in a table', 'as a table', 'table format', 'show all', 'list all', 'display all']
+            force_table = any(keyword in user_question.lower() for keyword in table_keywords)
+            
+            if force_table:
+                logger.info(f"🔄 User requested table format, ensuring full dataset table")
+                data['chart_type'] = 'table'
+                
+                # Always create table data from full raw data when table is requested
+                if raw_data:
+                    table_data, columns = self._create_table_from_raw_data(raw_data)
+                    if 'chart_config' not in data:
+                        data['chart_config'] = {}
+                    data['chart_config']['tableData'] = table_data
+                    data['chart_config']['columns'] = columns
+                    logger.info(f"✅ Created table with {len(table_data)} rows, {len(columns)} columns from full dataset")
+                    # Update summary and insights to reflect actual data count
+                    data = self._update_summary_for_full_dataset(data, table_data, user_question)
+            
+            # Check if Gemini generated a table but with limited data - replace with full dataset
+            elif data.get('chart_type') == 'table' and raw_data:
+                existing_table_data = data.get('chart_config', {}).get('tableData', [])
+                if len(existing_table_data) < len(raw_data):
+                    logger.info(f"🔄 Replacing limited table data ({len(existing_table_data)} rows) with full dataset ({len(raw_data)} rows)")
+                    table_data, columns = self._create_table_from_raw_data(raw_data)
+                    if 'chart_config' not in data:
+                        data['chart_config'] = {}
+                    data['chart_config']['tableData'] = table_data
+                    data['chart_config']['columns'] = columns
+                    logger.info(f"✅ Updated table with {len(table_data)} rows, {len(columns)} columns from full dataset")
+                    # Update summary and insights to reflect actual data count
+                    data = self._update_summary_for_full_dataset(data, table_data, user_question)
             
             # More flexible validation with auto-fixing
             required_fields = ['chart_type', 'chart_config', 'summary']
@@ -660,8 +762,10 @@ JSON only:"""
                     logger.info("✅ Fixed: Added default chart_type 'bar'")
                 
                 if 'summary' not in data:
-                    data['summary'] = f"Analysis of {len(raw_data)} data points completed successfully."
-                    logger.info("✅ Fixed: Added default summary")
+                    record_count = len(raw_data) if raw_data else 0
+                    data_type = self._determine_data_type_from_question(user_question)
+                    data['summary'] = f"Found {record_count} records. Analysis of {record_count} {data_type} completed successfully with {data.get('chart_type', 'chart')} visualization."
+                    logger.info("✅ Fixed: Added detailed summary")
                 
                 if 'chart_config' not in data:
                     data['chart_config'] = self._create_basic_chart_config(data['chart_type'], raw_data)
@@ -687,6 +791,189 @@ JSON only:"""
         except Exception as e:
             logger.error(f"❌ Visualization validation error: {e}")
             return False
+    
+    def _create_table_from_raw_data(self, raw_data: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+        """Create structured table data and columns from raw MongoDB results"""
+        if not raw_data:
+            return [], []
+            
+        # Get field names from first record
+        first_record = raw_data[0]
+        field_names = list(first_record.keys())
+        
+        logger.info(f"🔍 Table creation debug - Raw field names: {field_names}")
+        
+        # Create column definitions with proper labels and types
+        columns = []
+        for field_name in field_names:
+            if field_name == '_id':
+                continue  # Skip MongoDB ObjectId
+                
+            # Determine column type and label
+            label = self._format_field_name(field_name)
+            field_type = self._determine_field_type(field_name, first_record.get(field_name))
+            width = "25%" if len(field_names) <= 4 else "20%"
+            
+            columns.append({
+                "key": field_name,
+                "label": label,
+                "type": field_type,
+                "width": width,
+                "align": "right" if field_type in ['number', 'currency'] else "left"
+            })
+        
+        logger.info(f"🔍 Table creation debug - Created {len(columns)} columns: {[col['label'] for col in columns]}")
+        
+        # Clean and format table data
+        table_data = []
+        for record in raw_data[:50]:  # Limit to 50 rows for performance
+            cleaned_record = {}
+            for field_name in field_names:
+                if field_name == '_id':
+                    continue
+                value = record.get(field_name)
+                cleaned_record[field_name] = self._clean_table_value(value)
+            table_data.append(cleaned_record)
+        
+        return table_data, columns
+    
+    def _update_summary_for_full_dataset(self, data: Dict, table_data: List[Dict], user_question: str = "") -> Dict:
+        """Update summary and insights to reflect the actual full dataset"""
+        record_count = len(table_data)
+        
+        # Determine data type from question or table data
+        data_type = self._determine_data_type_from_question(user_question)
+        
+        # Generate accurate summary
+        data['summary'] = f"Found {record_count} records. Complete dataset showing all {record_count} {data_type} from the database."
+        
+        # Generate detailed insights based on actual data
+        insights = [f"Successfully retrieved and displayed all {record_count} {data_type} from the database"]
+        
+        # Add specific insights based on data analysis
+        if table_data:
+            # Analyze data for meaningful insights
+            if "role" in table_data[0]:
+                role_counts = {}
+                for record in table_data:
+                    role = record.get('role', 'unknown')
+                    role_counts[role] = role_counts.get(role, 0) + 1
+                if len(role_counts) > 1:
+                    role_breakdown = ", ".join([f"{count} {role}" for role, count in role_counts.items()])
+                    insights.append(f"Role distribution: {role_breakdown}")
+            
+            if "createdAt" in table_data[0]:
+                # Analyze creation dates
+                dates = [record.get('createdAt', '') for record in table_data if record.get('createdAt')]
+                if dates:
+                    recent_count = sum(1 for date in dates if '2025' in str(date))
+                    if recent_count > 0:
+                        insights.append(f"{recent_count} {data_type} were created in 2025")
+            
+            # Add data completeness insight
+            if record_count > 10:
+                insights.append(f"Large dataset with {record_count} records - all records are displayed in the table")
+            elif record_count > 1:
+                insights.append(f"Complete dataset with {record_count} records - all data is shown")
+        
+        data['insights'] = insights
+        
+        # Update recommendations
+        recommendations = [
+            f"Review all {record_count} {data_type} in the table above for complete analysis",
+            "Use table sorting and filtering capabilities for detailed examination",
+        ]
+        
+        if record_count > 5:
+            recommendations.append("Consider exporting data for further analysis in external tools")
+        
+        data['recommendations'] = recommendations
+        
+        return data
+    
+    def _determine_data_type_from_question(self, user_question: str = "") -> str:
+        """Determine data type from user question for accurate summaries"""
+        question_lower = user_question.lower()
+        if "user" in question_lower:
+            return "users"
+        elif "customer" in question_lower:
+            return "customers"
+        elif "document" in question_lower:
+            return "documents"
+        elif "batch" in question_lower:
+            return "batches"
+        elif "cost" in question_lower or "evaluation" in question_lower:
+            return "cost evaluations"
+        elif "extraction" in question_lower:
+            return "extractions"
+        elif "obligation" in question_lower:
+            return "obligations"
+        elif "file" in question_lower:
+            return "files"
+        elif "conversation" in question_lower or "chat" in question_lower:
+            return "conversations"
+        elif "prompt" in question_lower:
+            return "prompts"
+        else:
+            return "records"
+    
+    def _format_field_name(self, field_name: str) -> str:
+        """Convert field names to readable labels"""
+        field_mappings = {
+            'userId': 'User ID',
+            'emailId': 'Email Address',
+            'email': 'Email Address',
+            'name': 'Name',
+            'role': 'Role', 
+            'createdAt': 'Created Date',
+            'updatedAt': 'Updated Date',
+            'lastLogin': 'Last Login',
+            'batchId': 'Batch ID',
+            'fileId': 'File ID',
+            'totalCost': 'Total Cost',
+            'inputTokens': 'Input Tokens',
+            'outputTokens': 'Output Tokens',
+            'modelType': 'Model Type',
+            'operationType': 'Operation Type',
+            'Confidence_Score': 'Confidence Score',
+            'obligationType': 'Obligation Type',
+            'Contract_Name': 'Contract Name',
+            'Value': 'Extracted Value',
+            'Type': 'Extraction Type',
+            'Name': 'Field Name',
+            'Status': 'Status',
+            'batchId': 'Batch ID',
+            'fileId': 'File ID',
+            'extractionType': 'Extraction Type',
+            'processingTime': 'Processing Time',
+            'timestamp': 'Timestamp'
+        }
+        
+        return field_mappings.get(field_name, field_name.replace('_', ' ').title())
+    
+    def _determine_field_type(self, field_name: str, sample_value) -> str:
+        """Determine appropriate column type for formatting"""
+        if field_name in ['totalCost', 'costPerToken']:
+            return 'currency'
+        elif field_name in ['createdAt', 'updatedAt', 'timestamp', 'Timestamp']:
+            return 'date'
+        elif field_name in ['inputTokens', 'outputTokens', 'duration', 'Confidence_Score']:
+            return 'number'
+        elif isinstance(sample_value, (int, float)):
+            return 'number'
+        else:
+            return 'text'
+    
+    def _clean_table_value(self, value):
+        """Clean values for table display"""
+        if value is None:
+            return ''
+        elif hasattr(value, 'isoformat'):  # datetime
+            return value.isoformat()
+        elif hasattr(value, 'hex'):  # ObjectId
+            return str(value)
+        else:
+            return value
     
     def _create_basic_chart_config(self, chart_type: str, raw_data: List[Dict]) -> Dict:
         """Create basic chart configuration as fallback"""
@@ -1081,6 +1368,7 @@ class PerfectedTwoStageProcessor:
         from config import DATABASE_SCHEMA
         self.schema_info = DATABASE_SCHEMA.copy()
     
+    
     async def process_question(self, user_question: str) -> Dict[str, Any]:
         """Enhanced two-stage processing with Gemini priority"""
         start_time = datetime.now()
@@ -1312,18 +1600,18 @@ if GOOGLE_API_KEY and GOOGLE_API_KEY != 'your-gemini-api-key-here':
         gemini_client = BulletproofGeminiClient(GOOGLE_API_KEY)
         gemini_available = gemini_client.available
         if gemini_available:
-            logger.info("✅ Bulletproof Gemini client initialized")
-            print("✅ Bulletproof Gemini client initialized")
+            logger.info("Bulletproof Gemini client initialized")
+            print("Bulletproof Gemini client initialized")
         else:
-            logger.warning("⚠️ Gemini client created but not available")
-            print("⚠️ Gemini client created but not available")
+            logger.warning("Gemini client created but not available")
+            print("Gemini client created but not available")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize Gemini: {e}")
-        print(f"❌ Gemini Error: {e}")
+        logger.error(f"Failed to initialize Gemini: {e}")
+        print(f"Gemini Error: {e}")
         gemini_available = False
 else:
-    logger.warning("⚠️ No Google API key provided")
-    print("⚠️ No Google API key provided")
+    logger.warning("No Google API key provided")
+    print("No Google API key provided")
     gemini_available = False
 
 # Initialize processors
@@ -1332,11 +1620,11 @@ if db is not None:
     
     if gemini_available and gemini_client:
         two_stage_processor = PerfectedTwoStageProcessor(gemini_client, simple_processor, db)
-        logger.info("✅ Perfected two-stage processor initialized")
-        print("✅ Perfected two-stage processor initialized")
+        logger.info("Perfected two-stage processor initialized")
+        print("Perfected two-stage processor initialized")
     else:
-        logger.info("✅ Complete simple processor ready (Gemini not available)")
-        print("✅ Complete simple processor ready (Gemini not available)")
+        logger.info("Complete simple processor ready (Gemini not available)")
+        print("Complete simple processor ready (Gemini not available)")
 
 # ============================================================================
 # INITIALIZE MEMORY RAG SYSTEM
@@ -1349,8 +1637,8 @@ memory_enhanced_processor = None
 if mongodb_available and db is not None:
     try:
         memory_manager = MemoryRAGManager(db, gemini_client)
-        logger.info("✅ Memory RAG Manager initialized")
-        print("✅ Memory RAG Manager initialized")
+        logger.info("Memory RAG Manager initialized")
+        print("Memory RAG Manager initialized")
         
         # Create memory-enhanced processor WITH Gemini client for smart suggestions
         if two_stage_processor:
@@ -1376,8 +1664,8 @@ if mongodb_available and db is not None:
         memory_manager = None
         memory_enhanced_processor = None
 else:
-    logger.warning("⚠️ MongoDB not available - Memory RAG disabled")
-    print("⚠️ MongoDB not available - Memory RAG disabled")
+    logger.warning("MongoDB not available - Memory RAG disabled")
+    print("MongoDB not available - Memory RAG disabled")
 
 # ============================================================================
 # CHAT API ENDPOINTS
@@ -1756,8 +2044,16 @@ def process_query():
             logger.info("🔄 Using Standard Processing")
             
             if two_stage_processor:
-                result = two_stage_processor.process_question(user_question)
-                result['processing_mode'] = 'two_stage'
+                # Use asyncio to run the async two-stage processor
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(
+                        two_stage_processor.process_question(user_question)
+                    )
+                    result['processing_mode'] = 'two_stage'
+                finally:
+                    loop.close()
             elif simple_processor:
                 result = simple_processor.process_question(user_question)
                 result['processing_mode'] = 'simple'

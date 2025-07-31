@@ -163,6 +163,12 @@ class BulletproofGeminiClient:
                 if not self._validate_visualization_response(viz_data):
                     raise ValueError("Response missing required fields")
                 
+                # CRITICAL: Override chart type if intent detection says table but Gemini returned something else
+                force_table = self._detect_table_intent(user_question)
+                if force_table and viz_data.get('chart_type') != 'table':
+                    logger.warning(f"🚨 OVERRIDING: Gemini returned {viz_data.get('chart_type')} but table was required")
+                    viz_data = self._force_table_format(viz_data, raw_data, user_question)
+                
                 logger.info("✅ Successfully generated visualization")
                 return GeminiResponse(
                     success=True,
@@ -338,12 +344,88 @@ For "How are our AI agents performing?":
 }}
 
 CHART TYPE SELECTION:
+- table: "show all", "list all", raw data display, detailed records (MANDATORY for listing queries)
 - bar: comparisons, rankings, performance metrics
-- pie/doughnut: distributions, percentages, breakdowns (≤8 categories)
+- pie/doughnut: distributions, percentages, breakdowns (≤8 categories)  
 - line: trends over time, sequential data, cost tracking
 
 JSON only - no other text:"""
 
+    def _detect_table_intent(self, user_question: str) -> bool:
+        """
+        Detect if user wants a table visualization based on keywords
+        Critical for intent recognition accuracy
+        """
+        question_lower = user_question.lower().strip()
+        
+        # Definitive table keywords - highest priority
+        table_keywords = [
+            "show me all", "list all", "display all", "get all",
+            "show all", "list me all", "display me all",
+            "in a table", "as a table", "table format",
+            "raw data", "details", "records", "entries"
+        ]
+        
+        for keyword in table_keywords:
+            if keyword in question_lower:
+                logger.info(f"🎯 Table intent detected: '{keyword}' found in '{user_question}'")
+                return True
+        
+        return False
+    
+    def _force_table_format(self, viz_data: Dict, raw_data: List[Dict], user_question: str) -> Dict:
+        """
+        Force conversion to table format when Gemini ignores intent
+        This is the bulletproof fallback that ensures table queries get tables
+        """
+        logger.info("🔧 Converting to table format due to intent mismatch")
+        
+        # Create table data from raw_data
+        if not raw_data:
+            table_data = []
+            columns = []
+        else:
+            # Use first few records for table
+            table_data = raw_data[:50]  # Limit to 50 records for performance
+            
+            # Auto-generate columns from first record
+            if table_data:
+                first_record = table_data[0]
+                columns = []
+                for field, value in first_record.items():
+                    # Determine field type
+                    field_type = "string"
+                    if isinstance(value, (int, float)):
+                        field_type = "number"
+                    elif isinstance(value, bool):
+                        field_type = "boolean"
+                    elif field.lower() in ['date', 'timestamp', 'createdat', 'updatedat']:
+                        field_type = "date"
+                    
+                    # Clean field name for display
+                    display_name = str(field).replace('_', ' ').title()
+                    
+                    columns.append({
+                        "field": field,
+                        "header": display_name,
+                        "type": field_type
+                    })
+        
+        # Create new table-format response
+        forced_response = {
+            "chart_type": "table",
+            "chart_config": {
+                "type": "table",
+                "tableData": table_data,
+                "columns": columns
+            },
+            "summary": f"Table showing {len(table_data)} records as requested by user query: '{user_question}'",
+            "insights": viz_data.get('insights', [f"Displaying {len(table_data)} records in table format"]),
+            "recommendations": viz_data.get('recommendations', ["Review individual records for detailed analysis"])
+        }
+        
+        return forced_response
+    
     def _build_visualization_prompt(self, user_question: str, raw_data: List[Dict], 
                                   query_context: Dict) -> str:
         """
@@ -353,7 +435,18 @@ JSON only - no other text:"""
         # Sample the data for context (limit to 5 records for prompt efficiency)
         sample_data = raw_data[:5] if raw_data else []
         
+        # Detect if user wants table format
+        force_table = self._detect_table_intent(user_question)
+        table_instruction = ""
+        
+        if force_table:
+            table_instruction = """
+🚨 CRITICAL OVERRIDE: USER WANTS TABLE FORMAT - SET chart_type = "table" MANDATORY
+This query contains table-intent keywords. You MUST return chart_type as "table", not bar/pie/line.
+"""
+        
         return f"""You are a data visualization expert specializing in AI operations and business intelligence.
+{table_instruction}
 
 DOMAIN: AI Operations & Document Intelligence
 - Focus on actionable insights for cost optimization, performance improvement, compliance management
@@ -372,7 +465,7 @@ CRITICAL REQUIREMENTS:
 
 RESPONSE FORMAT (JSON only):
 {{
-  "chart_type": "bar|pie|line|doughnut",
+  "chart_type": "bar|pie|line|doughnut|table",
   "chart_config": {{
     "type": "bar",
     "data": {{
@@ -404,9 +497,30 @@ RESPONSE FORMAT (JSON only):
     "Key insight 3 highlighting trends, anomalies, or optimization opportunities"
   ],
   "recommendations": [
-    "Actionable recommendation for cost optimization or performance improvement",
+    "Actionable recommendation for cost optimization or performance improvement", 
     "Strategic suggestion based on the data patterns observed"
   ]
+}}
+
+FOR TABLE FORMAT (when chart_type = "table"):
+{{
+  "chart_type": "table",
+  "chart_config": {{
+    "type": "table",
+    "tableData": [
+      {{"Name": "Prompt 1", "Type": "Document", "Created": "2025-07-15", "Usage": 42}},
+      {{"Name": "Prompt 2", "Type": "Legal", "Created": "2025-07-14", "Usage": 28}}
+    ],
+    "columns": [
+      {{"field": "Name", "header": "Prompt Name", "type": "string"}},
+      {{"field": "Type", "header": "Type", "type": "string"}},
+      {{"field": "Created", "header": "Created Date", "type": "date"}},
+      {{"field": "Usage", "header": "Usage Count", "type": "number"}}
+    ]
+  }},
+  "summary": "Table showing detailed records with all relevant fields",
+  "insights": ["Data insights about the records shown"],
+  "recommendations": ["Actions based on the detailed data"]
 }}
 
 GENAI DOMAIN CONTEXT:
