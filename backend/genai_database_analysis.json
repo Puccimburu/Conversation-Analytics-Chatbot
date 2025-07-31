@@ -1,0 +1,39 @@
+{
+  "chat_memories": {
+    "document_count": 12,
+    "category": "CHAT_SYSTEM",
+    "sample_fields": [
+      "_id",
+      "fragment_id",
+      "chat_id",
+      "content",
+      "content_type",
+      "timestamp",
+      "importance_score",
+      "keywords",
+      "entities",
+      "related_fragments",
+      "access_count",
+      "last_accessed",
+      "context",
+      "domain"
+    ],
+    "has_data": true
+  },
+  "chat_sessions": {
+    "document_count": 2,
+    "category": "CHAT_SYSTEM",
+    "sample_fields": [
+      "_id",
+      "chat_id",
+      "title",
+      "category",
+      "created_at",
+      "updated_at",
+      "status",
+      "messages",
+      "metadata"
+    ],
+    "has_data": true
+  }
+}
