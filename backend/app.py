@@ -1,5 +1,4 @@
-# backend/app.py - Fully Modularized Flask Application
-
+# Complete backend/app.py with debugging and table fixes
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import asyncio
@@ -66,154 +65,153 @@ if mongodb_available:
 # INITIALIZE COMPONENTS
 # ============================================================================
 
-# Initialize components
+# Initialize components with error handling
 gemini_client = None
+gemini_available = False
+if GOOGLE_API_KEY:
+    try:
+        gemini_client = BulletproofGeminiClient(GOOGLE_API_KEY)
+        gemini_available = True
+        logger.info("✅ Enhanced Gemini client initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize Gemini client: {e}")
+
+# Initialize processors
 simple_processor = None
 two_stage_processor = None
 memory_manager = None
 memory_enhanced_processor = None
-gemini_available = False
 
-# Initialize Gemini
-if GOOGLE_API_KEY and GOOGLE_API_KEY != 'your-gemini-api-key-here':
+if mongodb_available:
     try:
-        gemini_client = BulletproofGeminiClient(GOOGLE_API_KEY)
-        gemini_available = True  # Assuming the imported class handles availability check
-        logger.info("Enhanced Gemini client initialized from utils/enhanced_gemini_client")
-        print("Enhanced Gemini client initialized from utils/enhanced_gemini_client")
-    except Exception as e:
-        logger.error(f"Failed to initialize Gemini: {e}")
-        print(f"Gemini Error: {e}")
-        gemini_available = False
-else:
-    logger.warning("No Google API key provided")
-    print("No Google API key provided")
-    gemini_available = False
-
-# Initialize processors
-if db is not None:
-    simple_processor = CompleteSimpleQueryProcessor(db)
-    logger.info("Simple query processor initialized from utils/simple_query_processor")
-    print("Simple query processor initialized from utils/simple_query_processor")
-    
-    if gemini_available and gemini_client:
-        two_stage_processor = PerfectedTwoStageProcessor(gemini_client, simple_processor, db)
-        logger.info("Perfected two-stage processor initialized from utils/perfected_processor")
-        print("Perfected two-stage processor initialized from utils/perfected_processor")
-    else:
-        logger.info("Complete simple processor ready (Gemini not available)")
-        print("Complete simple processor ready (Gemini not available)")
-
-# Initialize Memory RAG system
-if mongodb_available and db is not None:
-    try:
-        memory_manager = MemoryRAGManager(db, gemini_client)
-        logger.info("Memory RAG Manager initialized from utils/memory_rag")
-        print("Memory RAG Manager initialized from utils/memory_rag")
+        # Initialize simple processor as fallback
+        simple_processor = CompleteSimpleQueryProcessor(db)
+        logger.info("✅ Complete Simple Processor initialized")
         
-        # Create memory-enhanced processor
-        if two_stage_processor:
-            memory_enhanced_processor = MemoryEnhancedProcessor(
-                two_stage_processor, 
-                memory_manager, 
-                gemini_client
-            )
-            logger.info("Memory-Enhanced Two-Stage Processor ready")
-            print("Memory-Enhanced Two-Stage Processor ready")
-        elif simple_processor:
-            memory_enhanced_processor = MemoryEnhancedProcessor(
-                simple_processor, 
-                memory_manager, 
-                gemini_client
-            )
-            logger.info("Memory-Enhanced Simple Processor ready")
-            print("Memory-Enhanced Simple Processor ready")
+        # Initialize two-stage processor if Gemini is available
+        if gemini_available:
+            two_stage_processor = PerfectedTwoStageProcessor(gemini_client, simple_processor, db)
+            logger.info("✅ Perfected Two-Stage Processor initialized")
+            
+            # Initialize memory systems
+            memory_manager = MemoryRAGManager()
+            memory_enhanced_processor = MemoryEnhancedProcessor(two_stage_processor, memory_manager)
+            logger.info("✅ Memory-Enhanced Processor initialized")
             
     except Exception as e:
-        logger.error(f"Failed to initialize Memory RAG: {e}")
-        print(f"Memory RAG Error: {e}")
-        memory_manager = None
-        memory_enhanced_processor = None
-else:
-    logger.warning("MongoDB not available - Memory RAG disabled")
-    print("MongoDB not available - Memory RAG disabled")
+        logger.error(f"Failed to initialize processors: {e}")
 
 # ============================================================================
-# FLASK ROUTES
+# MAIN QUERY PROCESSING ENDPOINT WITH ENHANCED DEBUGGING
 # ============================================================================
 
 @app.route('/api/query', methods=['POST'])
-def process_query():
-    """Enhanced query processing with Memory RAG integration - Fully Modular"""
+def process_query_wrapper():
+    """Wrapper to handle async processing in Flask"""
+    return run_async(process_query_async())
+
+async def process_query_async():
+    """
+    Main query processing endpoint with comprehensive debugging for table issues
+    """
+    start_time = time.time()
+    
     try:
+        # Parse request
         data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No JSON data provided"}), 400
+        
         user_question = data.get('question', '').strip()
         chat_id = data.get('chat_id')
         
         if not user_question:
-            return jsonify({"error": "Question is required"}), 400
+            return jsonify({"success": False, "error": "No question provided"}), 400
         
-        # Determine if we should use memory enhancement
-        use_memory = chat_id and memory_enhanced_processor
-        
-        logger.info(f"🔍 Processing question: '{user_question}'" + 
-                   (f" (chat: {chat_id}, memory: {use_memory})" if chat_id else " (no chat)"))
-        
-        start_time = time.time()
-        result = None
+        logger.info(f"🔍 Processing question: '{user_question}' (chat: {chat_id}, memory: {memory_enhanced_processor})")
         
         # Save user message to chat if chat_id provided
         if chat_id and mongodb_available:
             user_message = {
-                'type': 'user',
+                'role': 'user',
                 'content': user_question,
                 'timestamp': datetime.now(timezone.utc)
             }
             save_message_to_chat(db, chat_id, user_message)
         
-        # Process with Memory RAG if available and chat_id provided
-        if use_memory:
+        # Process with best available processor
+        result = None
+        processing_mode = "unknown"
+        
+        if memory_enhanced_processor and gemini_available:
             logger.info("🧠 Using Memory-Enhanced Processing")
+            processing_mode = "memory_enhanced"
+            result = await memory_enhanced_processor.process_with_memory(user_question, chat_id)
             
-            # Use asyncio to run the async memory processing
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(
-                    memory_enhanced_processor.process_with_memory(user_question, chat_id)
-                )
-                result['processing_mode'] = 'memory_enhanced'
-            finally:
-                loop.close()
-                
+        elif two_stage_processor and gemini_available:
+            logger.info("🚀 Using Perfected Two-Stage Processing")
+            processing_mode = "two_stage_perfected"
+            result = await two_stage_processor.process_question(user_question)
+            
+        elif simple_processor:
+            logger.info("📊 Using Complete Simple Processing")
+            processing_mode = "simple_complete"
+            result = simple_processor.process_question(user_question)
+            
         else:
-            # Fallback to regular processing
-            logger.info("🔄 Using Standard Processing")
-            
-            if two_stage_processor:
-                # Use asyncio to run the async two-stage processor
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    result = loop.run_until_complete(
-                        two_stage_processor.process_question(user_question)
-                    )
-                    result['processing_mode'] = 'two_stage'
-                finally:
-                    loop.close()
-            elif simple_processor:
-                result = simple_processor.process_question(user_question)
-                result['processing_mode'] = 'simple'
-            else:
-                return jsonify({"error": "No processors available"}), 503
+            return jsonify({
+                "success": False,
+                "error": "No processors available",
+                "processing_mode": "none"
+            }), 503
         
+        # Enhanced debugging for table responses
+        if result and result.get('success') and result.get('visualization'):
+            viz = result['visualization']
+            if viz.get('chart_type') == 'table':
+                chart_config = viz.get('chart_config', {})
+                table_data = chart_config.get('tableData', [])
+                columns = chart_config.get('columns', [])
+                
+                logger.info(f"🔍 TABLE RESPONSE DEBUG:")
+                logger.info(f"   - Chart type: {viz.get('chart_type')}")
+                logger.info(f"   - Table data rows: {len(table_data)}")
+                logger.info(f"   - Columns count: {len(columns)}")
+                
+                if table_data:
+                    sample_row = table_data[0]
+                    logger.info(f"   - Sample data keys: {list(sample_row.keys())}")
+                    logger.info(f"   - Sample data values: {dict(list(sample_row.items())[:3])}")
+                
+                if columns:
+                    column_keys = [col.get('key', col.get('field', 'unknown')) for col in columns]
+                    column_labels = [col.get('label', col.get('header', 'unknown')) for col in columns]
+                    logger.info(f"   - Column keys: {column_keys}")
+                    logger.info(f"   - Column labels: {column_labels}")
+                
+                # Verify data-column alignment
+                if table_data and columns:
+                    sample_row = table_data[0]
+                    for col in columns:
+                        col_key = col.get('key', col.get('field'))
+                        if col_key in sample_row:
+                            logger.info(f"   ✅ Column '{col_key}' matches data field")
+                        else:
+                            logger.warning(f"   ❌ Column '{col_key}' NOT found in data fields: {list(sample_row.keys())}")
+        
+        # Calculate execution time
         execution_time = time.time() - start_time
-        result['execution_time'] = round(execution_time, 3)
         
-        # Save AI response to chat
-        if chat_id and mongodb_available and result.get('success'):
+        # Add processing metadata
+        if result and result.get('success'):
+            result['processing_mode'] = processing_mode
+            result['execution_time'] = execution_time
+            result['timestamp'] = datetime.now(timezone.utc).isoformat()
+        
+        # Save AI response to chat if successful
+        if chat_id and mongodb_available and result and result.get('success'):
             ai_message = {
-                'type': 'assistant',
+                'role': 'assistant',
                 'content': result.get('summary', 'Analysis completed'),
                 'chart_data': result.get('chart_data'),
                 'insights': result.get('insights'),
@@ -236,9 +234,13 @@ def process_query():
             "processing_mode": "error"
         }), 500
 
+# ============================================================================
+# HEALTH AND SYSTEM ENDPOINTS
+# ============================================================================
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint with detailed status"""
     return jsonify({
         "status": "healthy",
         "mongodb_available": mongodb_available,
@@ -274,6 +276,38 @@ def system_info():
             "model": "gemini-1.5-flash" if gemini_available else None
         }
     })
+
+@app.route('/api/debug/collections', methods=['GET'])
+def debug_collections():
+    """Debug endpoint to check database collections"""
+    if not mongodb_available:
+        return jsonify({"error": "Database not available"}), 503
+    
+    try:
+        collections = db.list_collection_names()
+        collection_stats = {}
+        
+        for collection_name in collections:
+            try:
+                collection = db[collection_name]
+                count = collection.count_documents({})
+                sample = collection.find_one({}) if count > 0 else None
+                
+                collection_stats[collection_name] = {
+                    "count": count,
+                    "sample_fields": list(sample.keys()) if sample else [],
+                    "has_data": count > 0
+                }
+            except Exception as e:
+                collection_stats[collection_name] = {"error": str(e)}
+        
+        return jsonify({
+            "total_collections": len(collections),
+            "collections": collection_stats
+        })
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to get collection info: {str(e)}"}), 500
 
 # ============================================================================
 # CHAT MANAGEMENT ENDPOINTS
@@ -336,55 +370,59 @@ def delete_chat(chat_id):
     else:
         return jsonify({"error": "Chat not found"}), 404
 
+# ============================================================================
+# ASYNC WRAPPER FOR FLASK
+# ============================================================================
+
+def run_async(coro):
+    """Helper to run async functions in Flask routes"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+# Remove duplicate route definitions - use only the main process_query function
+
 if __name__ == '__main__':
     print("\nStarting GenAI Operations Analytics Server - FULLY MODULAR VERSION...")
     print("Modular Architecture Features:")
     print("   - Chat management: utils/chat_manager.py")
     print("   - Enhanced Gemini client: utils/enhanced_gemini_client.py")
     print("   - Simple query processor: utils/simple_query_processor.py")
-    print("   - Perfected two-stage processor: utils/perfected_processor.py")
+    print("   - Perfected processor: utils/perfected_processor.py")
     print("   - Memory RAG system: utils/memory_rag.py")
     print("   - Analytics processor: utils/analytics_processor.py")
-    print("   - Configuration: config.py")
     
-    print("\nSystem Status:")
+    print("\n🔧 System Status:")
     if mongodb_available:
-        print("   [OK] MongoDB: Connected to GenAI operations database")
-        print("   [OK] Chat System: Indexes created, ready for persistence")
+        print("   ✅ MongoDB: Connected to GenAI operations database")
+        print("   ✅ Chat System: Indexes created, ready for persistence")
     else:
-        print("   [ERROR] MongoDB: Connection failed")
-        print("   [ERROR] Chat System: Not available")
+        print("   ❌ MongoDB: Connection failed")
+        print("   ❌ Chat System: Not available")
     
     if gemini_available:
-        print("   [OK] Gemini AI: Enhanced client ready for AI operations")
+        print("   ✅ Gemini AI: Enhanced client ready for AI operations")
     else:
-        print("   [WARNING] Gemini AI: Not available")
+        print("   ⚠️ Gemini AI: Not available")
     
     if two_stage_processor:
-        print("   [OK] Perfected Two-Stage Processor: AI operations processing ready")
+        print("   ✅ Perfected Two-Stage Processor: AI operations processing ready")
     elif simple_processor:
-        print("   [OK] Complete Simple Processor: Fallback processing ready")
+        print("   ✅ Complete Simple Processor: Fallback processing ready")
     else:
-        print("   [ERROR] No processors available")
+        print("   ❌ No processors available")
     
     if memory_manager:
-        print("   [OK] Memory RAG: Advanced conversation memory system ready")
+        print("   ✅ Memory RAG: Advanced conversation memory system ready")
     
-    print(f"\nServer starting on http://localhost:5000")
-    print("GenAI Operations Endpoints:")
+    print(f"\n🌐 Server starting on http://localhost:5000")
+    print("📊 GenAI Operations Endpoints:")
     print("   - POST /api/query (AI operations intelligent processing + chat)")
-    print("   - GET  /api/health (system health check)")
-    print("   - GET  /api/system/info (modular architecture information)")
-    
-    print("\nModular File Structure:")
-    print("   app.py - Flask application with routing only")
-    print("   config.py - Configuration and database schema")
-    print("   utils/chat_manager.py - Chat session management")
-    print("   utils/enhanced_gemini_client.py - Bulletproof Gemini client")
-    print("   utils/simple_query_processor.py - Pattern matching processor")
-    print("   utils/perfected_processor.py - Two-stage Gemini processor")
-    print("   utils/memory_rag.py - Memory and RAG system")
-    print("   utils/analytics_processor.py - Analytics processing")
+    print("   - GET /api/health (System health check)")
+    print("   - GET /api/debug/collections (Database debugging)")
     print("=" * 80)
     
     app.run(debug=True, host='0.0.0.0', port=5000)
