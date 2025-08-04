@@ -98,19 +98,21 @@ class BulletproofGeminiClient:
     def _build_query_prompt(self, user_question: str, database_schema: Dict) -> str:
         """Builds a clean, readable prompt for query generation."""
         collections_info = "\n".join([
-            f"- {name}: {schema.get('description', '')}" 
+            f"- {name}: {schema.get('description', '')} (fields: {', '.join(schema.get('fields', [])[:8])})" 
             for name, schema in database_schema.get("collections", {}).items()
         ])
         
         return textwrap.dedent(f"""
             You are a MongoDB query expert. Your task is to convert a user's question into a valid MongoDB aggregation pipeline.
 
-            DATABASE COLLECTIONS:
+            DATABASE COLLECTIONS WITH FIELDS:
             {collections_info}
 
             USER QUESTION: "{user_question}"
 
-            RESPONSE FORMAT (JSON only):
+            IMPORTANT: Only use field names that exist in the collection schema above. Do not assume field names.
+
+            RESPONSE FORMAT (JSON only, no comments):
             {{
               "collection": "exact_collection_name",
               "pipeline": [ ...mongodb aggregation stages... ]
@@ -186,12 +188,28 @@ class BulletproofGeminiClient:
         return True
 
     def _extract_json_from_response(self, response_text: str) -> Optional[Dict]:
-        """Extracts JSON from a string, stripping markdown."""
-        match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        """Extracts JSON from a string, stripping markdown and comments."""
+        # First strip markdown code fences
+        cleaned_text = re.sub(r'```(?:json)?\n?', '', response_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(r'\n?```', '', cleaned_text)
+        
+        # Extract JSON object
+        match = re.search(r'\{.*\}', cleaned_text, re.DOTALL)
         if match:
+            json_str = match.group(0)
+            
+            # Remove JavaScript-style comments that break JSON parsing
+            json_str = re.sub(r'//.*?(?=\n|$)', '', json_str, flags=re.MULTILINE)
+            json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+            
+            # Clean up extra whitespace and trailing commas
+            json_str = re.sub(r',\s*}', '}', json_str)
+            json_str = re.sub(r',\s*]', ']', json_str)
+            
             try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                logger.error("Failed to decode extracted JSON.")
+                return json.loads(json_str)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to decode extracted JSON: {e}")
+                logger.error(f"Cleaned JSON string: {json_str}")
                 return None
         return None

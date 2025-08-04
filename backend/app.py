@@ -32,7 +32,7 @@ CORS(app)
 
 # Configuration
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://127.0.0.1:27017/genai')
+MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://127.0.0.1:27017/genaiexeco-development')
 
 print("=" * 60)
 print("PERFECTED AI ANALYTICS - FULLY MODULAR ARCHITECTURE")
@@ -47,11 +47,11 @@ mongodb_available = False
 
 try:
     client = pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
-    db = client.genai
+    db = client[Config.DATABASE_NAME]
     client.admin.command('ping')
     mongodb_available = True
-    logger.info("MongoDB connected successfully to GenAI database")
-    print("MongoDB connected successfully to GenAI database")
+    logger.info(f"MongoDB connected successfully to {Config.DATABASE_NAME} database")
+    print(f"MongoDB connected successfully to {Config.DATABASE_NAME} database")
 except Exception as e:
     logger.error(f"Failed to connect to MongoDB: {e}")
     print(f"MongoDB Error: {e}")
