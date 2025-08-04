@@ -21,17 +21,27 @@ class BulletproofGeminiClient:
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-1.5-flash')
         self.max_retries = 3
+        
+        # Test the connection and set availability
+        try:
+            test_response = self.model.generate_content("Test")
+            self.available = True
+            logger.info("✅ Gemini client initialized and tested")
+        except Exception as e:
+            logger.error(f"❌ Gemini test failed: {e}")
+            self.available = False
     
     async def generate_query(self, user_question: str, database_schema: Dict) -> Dict:
         """
-        Stage 1: Generate MongoDB query from user question
+        Stage 1: Generate MongoDB query from user question - FIXED SYNC VERSION
         """
         logger.info("🔍 Gemini Stage 1 - Query Generation (attempt 1)")
         prompt = self._build_query_prompt(user_question, database_schema)
         
         for attempt in range(self.max_retries):
             try:
-                response = await self.model.generate_content_async(prompt)
+                # FIXED: Use synchronous generate_content (no async version exists)
+                response = self.model.generate_content(prompt)
                 if response and response.text:
                     query_data = self._extract_json_from_response(response.text)
                     if query_data:
@@ -40,13 +50,18 @@ class BulletproofGeminiClient:
                 logger.warning(f"Query generation attempt {attempt + 1} failed, retrying...")
             except Exception as e:
                 logger.error(f"Query generation attempt {attempt + 1} failed: {str(e)}")
+                
+            # FIXED: Use synchronous sleep in Flask/async context
+            if attempt < self.max_retries - 1:
+                import time
+                time.sleep(1)
         
         return {"success": False, "error": "Failed to generate query after retries"}
     
     async def generate_visualization(self, user_question: str, raw_data: List[Dict], 
                                    query_context: Dict) -> Dict:
         """
-        Stage 2: Generate visualization from raw data with enhanced table support
+        Stage 2: Generate visualization from raw data with enhanced table support - FIXED SYNC VERSION
         """
         logger.info("🧠 Gemini Stage 2 - Visualization Generation (attempt 1)")
         
@@ -54,14 +69,14 @@ class BulletproofGeminiClient:
         
         if force_table:
             logger.info("🎯 Table intent detected, forcing table format")
-            # This is the line that was failing. We are ensuring the function exists now.
             return {"success": True, "data": self._force_table_format({}, raw_data, user_question)}
         
         prompt = self._build_visualization_prompt(user_question, raw_data, query_context)
         
         for attempt in range(self.max_retries):
             try:
-                response = await self.model.generate_content_async(prompt)
+                # FIXED: Use synchronous generate_content (no async version exists)
+                response = self.model.generate_content(prompt)
                 if response and response.text:
                     viz_data = self._extract_json_from_response(response.text)
                     if viz_data:
@@ -71,6 +86,11 @@ class BulletproofGeminiClient:
                 logger.warning(f"Visualization attempt {attempt + 1} failed, retrying...")
             except Exception as e:
                 logger.error(f"Visualization attempt {attempt + 1} failed: {str(e)}")
+                
+            # FIXED: Use synchronous sleep in Flask/async context  
+            if attempt < self.max_retries - 1:
+                import time
+                time.sleep(1)
         
         logger.info("🔧 Falling back to forced table format")
         return {"success": True, "data": self._force_table_format({}, raw_data, user_question)}

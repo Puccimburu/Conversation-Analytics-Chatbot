@@ -215,8 +215,8 @@ export const ChatProvider = ({ children }) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            query: query,
-            chat_id: options.chat_id || null, // 🎯 NEW: Include chat_id
+            question: query, // Fixed: backend expects 'question' not 'query'
+            chat_id: options.chat_id || null,
             chart_preference: options.chartType || 'auto',
             ...options
           })
