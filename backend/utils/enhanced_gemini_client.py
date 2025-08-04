@@ -65,6 +65,19 @@ class BulletproofGeminiClient:
         """
         logger.info("🧠 Gemini Stage 2 - Visualization Generation (attempt 1)")
         
+        # Check if we should skip visualization entirely
+        if self._should_skip_visualization(user_question, raw_data):
+            logger.info("📝 Skipping visualization - returning text-only response")
+            return {
+                "success": True, 
+                "data": {
+                    "summary": "The provided data contains insufficient information to create a meaningful visualization.",
+                    "insights": ["No meaningful data available for analysis."],
+                    "recommendations": ["Try a more specific query or check if data exists for this request."],
+                    "text_only": True
+                }
+            }
+        
         force_table = self._detect_table_intent(user_question)
         
         if force_table:
@@ -131,13 +144,20 @@ class BulletproofGeminiClient:
             {json.dumps(sample_data, indent=2, default=str)}
             TOTAL RECORDS: {len(raw_data)}
 
-            RESPONSE FORMAT (JSON only):
+            CHART TYPE SELECTION (MANDATORY):
+            - If user asks about "distribution", "breakdown", "percentage" → ALWAYS use "pie"
+            - If user asks about "trend", "over time", "timeline" → ALWAYS use "line"  
+            - If user asks about "comparison", "ranking", "top", "by" → use "bar"
+            - If user asks about "percentage breakdown" specifically → use "doughnut"
+            - DEFAULT: use "bar" only if none of the above keywords match
+
+            RESPONSE FORMAT (JSON only, no comments):
             {{
                 "summary": "A natural language summary of the findings.",
                 "insights": ["Insight 1.", "Insight 2."],
                 "recommendations": ["Recommendation 1.", "Recommendation 2."],
                 "chart_config": {{
-                    "chart_type": "bar",
+                    "type": "bar",
                     "data": {{"labels": [], "datasets": []}},
                     "options": {{}}
                 }}
@@ -149,6 +169,36 @@ class BulletproofGeminiClient:
         question_lower = user_question.lower()
         table_keywords = ["show all", "list all", "display all", "in a table", "raw data", "list of", "show users"]
         return any(keyword in question_lower for keyword in table_keywords)
+    
+    def _should_skip_visualization(self, user_question: str, raw_data: List[Dict]) -> bool:
+        """Detects if the response should be text-only without charts."""
+        question_lower = user_question.lower()
+        
+        # Skip visualization for informational queries
+        text_only_keywords = [
+            "what is", "how do", "how to", "explain", "define", "meaning of",
+            "help", "guide", "tutorial", "documentation", "why", "when"
+        ]
+        
+        if any(keyword in question_lower for keyword in text_only_keywords):
+            return True
+        
+        # Skip if no meaningful data (empty, null, or insufficient data)
+        if not raw_data or len(raw_data) == 0:
+            return True
+            
+        # Skip if all data is null/empty
+        meaningful_data = [item for item in raw_data if item and any(v for v in item.values() if v is not None)]
+        if len(meaningful_data) == 0:
+            return True
+            
+        # Skip if only one data point with null values (like your document types case)
+        if len(raw_data) == 1:
+            first_item = raw_data[0]
+            if not first_item or all(v is None for k, v in first_item.items() if k != '_id'):
+                return True
+        
+        return False
 
     def _force_table_format(self, viz_data: Dict, raw_data: List[Dict], user_question: str) -> Dict:
         """Force conversion to table format, trusting that raw_data is already clean."""
@@ -180,11 +230,27 @@ class BulletproofGeminiClient:
         }
 
     def _validate_visualization_response(self, data: Dict, raw_data: List[Dict], user_question: str) -> bool:
-        """A simple validator to ensure essential keys exist."""
+        """Validate and fix chart type based on question keywords."""
         if 'chart_config' not in data:
             data['chart_config'] = {}
         if 'summary' not in data:
             data['summary'] = "Analysis complete."
+        
+        # Override chart type if Gemini chose incorrectly
+        chart_config = data['chart_config']
+        question_lower = user_question.lower()
+        
+        # Force chart type based on keywords
+        if any(word in question_lower for word in ['distribution', 'breakdown']):
+            chart_config['type'] = 'pie'
+            logger.info(f"🔧 Overriding chart type to 'pie' for distribution question")
+        elif 'percentage breakdown' in question_lower:
+            chart_config['type'] = 'doughnut'
+            logger.info(f"🔧 Overriding chart type to 'doughnut' for percentage breakdown")
+        elif any(word in question_lower for word in ['trend', 'over time', 'timeline']):
+            chart_config['type'] = 'line'
+            logger.info(f"🔧 Overriding chart type to 'line' for trend question")
+        
         return True
 
     def _extract_json_from_response(self, response_text: str) -> Optional[Dict]:

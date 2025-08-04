@@ -13,7 +13,7 @@ class PerfectedTwoStageProcessor:
     
     def __init__(self, gemini_client, simple_processor, database):
         self.gemini_client = gemini_client
-        self.simple_processor = simple_processor
+        self.simple_processor = simple_processor  # Can be None for Gemini-only architecture
         self.db = database
         # Import GenAI schema from config
         self.schema_info = DATABASE_SCHEMA.copy()
@@ -45,10 +45,28 @@ class PerfectedTwoStageProcessor:
                     
                     logger.info(f"✅ Perfected two-stage Gemini processing successful: {len(raw_results)} results in {execution_time:.2f}s")
                     
+                    # Check if this is a text-only response (no visualization needed)
+                    if viz_data.get("text_only"):
+                        logger.info("📝 Returning text-only response without chart")
+                        return {
+                            "success": True,
+                            "summary": viz_data.get("summary", "Analysis completed successfully"),
+                            "insights": viz_data.get("insights", []),
+                            "recommendations": viz_data.get("recommendations", []),
+                            "results_count": len(raw_results),
+                            "execution_time": execution_time,
+                            "query_source": "gemini_two_stage_text_only",
+                            "ai_powered": True
+                            # Note: No chart_data field - frontend won't render chart
+                        }
+                    
+                    # Normal visualization response
+                    chart_data = viz_data.get("chart_config", {})
+                    
                     return {
                         "success": True,
                         "summary": viz_data.get("summary", "AI-powered analysis completed successfully"),
-                        "chart_data": viz_data.get("chart_config", {}),
+                        "chart_data": chart_data,
                         "insights": viz_data.get("insights", ["AI-generated insights"]),
                         "recommendations": viz_data.get("recommendations", ["AI-powered recommendations"]),
                         "results_count": len(raw_results),
@@ -57,38 +75,58 @@ class PerfectedTwoStageProcessor:
                         "ai_powered": True
                     }
                 else:
-                    # Stage 2 failed, use simple processor fallback
-                    logger.warning("Stage 2 failed, falling back to simple processor")
-                    fallback_result = self.simple_processor.process_question(user_question)
-                    if fallback_result.get("success"):
-                        fallback_result["query_source"] = "gemini_stage1_simple_fallback"
-                        return fallback_result
+                    # Stage 2 failed
+                    logger.warning("Stage 2 (visualization) failed")
+                    if self.simple_processor:
+                        logger.info("Trying simple processor fallback")
+                        fallback_result = self.simple_processor.process_question(user_question)
+                        if fallback_result.get("success"):
+                            fallback_result["query_source"] = "gemini_stage1_simple_fallback"
+                            return fallback_result
+                    else:
+                        # Return basic response with data but no visualization
+                        return {
+                            "success": True,
+                            "summary": f"Found {len(raw_results)} results but could not generate visualization.",
+                            "insights": ["Data retrieved successfully from database."],
+                            "recommendations": ["Try a different question format for better visualization."],
+                            "results_count": len(raw_results),
+                            "query_source": "gemini_stage1_only",
+                            "ai_powered": True
+                        }
             else:
-                # Gemini query returned no results, try simple processor
-                logger.warning("Gemini query returned no results, trying simple processor")
-                simple_result = self.simple_processor.process_question(user_question)
-                if simple_result.get("success"):
-                    simple_result["query_source"] = "gemini_failed_simple_success"
-                    simple_result["ai_powered"] = False
-                    return simple_result
+                # Gemini query returned no results
+                logger.warning("Gemini query returned no results")
+                if self.simple_processor:
+                    logger.info("Trying simple processor fallback")
+                    simple_result = self.simple_processor.process_question(user_question)
+                    if simple_result.get("success"):
+                        simple_result["query_source"] = "gemini_failed_simple_success"
+                        simple_result["ai_powered"] = False
+                        return simple_result
+                else:
+                    logger.info("No simple processor available, returning empty result message")
         
-        # Complete fallback to simple processor
-        logger.warning("Using simple processor as last resort")
-        simple_result = self.simple_processor.process_question(user_question)
+        # Final fallback
+        if self.simple_processor:
+            logger.warning("Using simple processor as last resort")
+            simple_result = self.simple_processor.process_question(user_question)
+            
+            if simple_result.get("success"):
+                simple_result["query_source"] = "simple_last_resort" 
+                simple_result["ai_powered"] = False
+                return simple_result
         
-        if simple_result.get("success"):
-            simple_result["query_source"] = "simple_last_resort"
-            simple_result["ai_powered"] = False
-            return simple_result
-        else:
-            return {
-                "success": False,
-                "error": "Unable to process your question",
-                "suggestions": [
-                    "Try a simpler question",
-                    "Ask about AI costs, document confidence, or compliance obligations"
-                ]
-            }
+        # No processors available or all failed
+        return {
+            "success": False,
+            "error": "Unable to process your question - no data found or query too complex",
+            "suggestions": [
+                "Try a more specific question",
+                "Check if data exists for this request",
+                "Ask about users, costs, documents, or compliance"
+            ]
+        }
     
     async def _execute_database_query(self, query_data: Dict[str, Any]) -> Optional[List[Dict]]:
         """Execute MongoDB query with enhanced error handling"""

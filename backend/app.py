@@ -16,7 +16,7 @@ from utils.chat_manager import (
     get_all_chats, get_chat_by_id, delete_chat_session
 )
 from utils.enhanced_gemini_client import BulletproofGeminiClient
-from utils.simple_query_processor import CompleteSimpleQueryProcessor
+# from utils.simple_query_processor import CompleteSimpleQueryProcessor  # Removed - using Gemini-only architecture
 from utils.perfected_processor import PerfectedTwoStageProcessor
 from config import Config, DATABASE_SCHEMA
 
@@ -76,30 +76,26 @@ if GOOGLE_API_KEY:
     except Exception as e:
         logger.error(f"Failed to initialize Gemini client: {e}")
 
-# Initialize processors
-simple_processor = None
+# Initialize processors (Gemini-only architecture)
 two_stage_processor = None
 memory_manager = None
 memory_enhanced_processor = None
 
-if mongodb_available:
+if mongodb_available and gemini_available:
     try:
-        # Initialize simple processor as fallback
-        simple_processor = CompleteSimpleQueryProcessor(db)
-        logger.info("✅ Complete Simple Processor initialized")
+        # Initialize two-stage processor (no simple fallback needed)
+        two_stage_processor = PerfectedTwoStageProcessor(gemini_client, None, db)
+        logger.info("✅ Perfected Two-Stage Processor initialized (Gemini-only)")
         
-        # Initialize two-stage processor if Gemini is available
-        if gemini_available:
-            two_stage_processor = PerfectedTwoStageProcessor(gemini_client, simple_processor, db)
-            logger.info("✅ Perfected Two-Stage Processor initialized")
-            
-            # Initialize memory systems
-            memory_manager = MemoryRAGManager()
-            memory_enhanced_processor = MemoryEnhancedProcessor(two_stage_processor, memory_manager)
-            logger.info("✅ Memory-Enhanced Processor initialized")
-            
+        # Initialize memory systems
+        memory_manager = MemoryRAGManager(db, gemini_client)
+        memory_enhanced_processor = MemoryEnhancedProcessor(two_stage_processor, memory_manager)
+        logger.info("✅ Memory-Enhanced Processor initialized")
+        
     except Exception as e:
         logger.error(f"Failed to initialize processors: {e}")
+elif not gemini_available:
+    logger.warning("⚠️ Gemini API not available - system requires Gemini for operation")
 
 # ============================================================================
 # MAIN QUERY PROCESSING ENDPOINT WITH ENHANCED DEBUGGING
@@ -153,16 +149,11 @@ async def process_query_async():
             processing_mode = "two_stage_perfected"
             result = await two_stage_processor.process_question(user_question)
             
-        elif simple_processor:
-            logger.info("📊 Using Complete Simple Processing")
-            processing_mode = "simple_complete"
-            result = simple_processor.process_question(user_question)
-            
         else:
             return jsonify({
                 "success": False,
-                "error": "No processors available",
-                "processing_mode": "none"
+                "error": "Gemini AI service required but not available",
+                "processing_mode": "gemini_required"
             }), 503
         
         # Enhanced debugging for table responses
@@ -246,7 +237,6 @@ def health_check():
         "mongodb_available": mongodb_available,
         "gemini_available": gemini_available,
         "processors": {
-            "simple_processor": simple_processor is not None,
             "two_stage_processor": two_stage_processor is not None,
             "memory_enhanced_processor": memory_enhanced_processor is not None
         },
@@ -410,10 +400,8 @@ if __name__ == '__main__':
     
     if two_stage_processor:
         print("   ✅ Perfected Two-Stage Processor: AI operations processing ready")
-    elif simple_processor:
-        print("   ✅ Complete Simple Processor: Fallback processing ready")
     else:
-        print("   ❌ No processors available")
+        print("   ❌ No processors available - Gemini AI required")
     
     if memory_manager:
         print("   ✅ Memory RAG: Advanced conversation memory system ready")
