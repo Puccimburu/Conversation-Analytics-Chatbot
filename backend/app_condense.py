@@ -91,7 +91,7 @@ if mongodb_available and gemini_available:
         
         # Initialize memory systems
         memory_manager = MemoryRAGManager(db, gemini_client)
-        memory_enhanced_processor = MemoryEnhancedProcessor(two_stage_processor, memory_manager)
+        memory_enhanced_processor = MemoryEnhancedProcessor(two_stage_processor, memory_manager, gemini_client)
         logger.info("✅ Memory-Enhanced Processor initialized")
         
     except Exception as e:
