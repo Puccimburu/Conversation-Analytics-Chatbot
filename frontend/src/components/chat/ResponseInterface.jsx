@@ -1,12 +1,11 @@
-// Complete and Corrected ResponseInterface.jsx with fixed table rendering
+// Fixed ResponseInterface.jsx - Removed duplicate inputs + Added Follow-Up Questions
 // File: frontend/src/components/chat/ResponseInterface.jsx
 
 import React, { useState, useRef, useEffect } from 'react';
 import { 
-  Send,
   Edit3, Save, X, Copy, RefreshCw, ChevronDown, ChevronUp,
   BarChart3, PieChart, TrendingUp, Table as TableIcon,
-  Download, ExternalLink, Zap, Activity, Target
+  Download, ExternalLink, Zap, Activity, Target, MessageCircle, ArrowRight
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
@@ -18,56 +17,59 @@ const ResponseInterface = ({
   existingMessages = [],
   chatTitle = '',
   onClose = () => {},
-  query = null // Initial query for new chats
+  query = null,
+  onNewQuery = () => {} // NEW: Callback to handle new queries from follow-ups
 }) => {
   const [editingResponseId, setEditingResponseId] = useState(null);
   const [expandedResponses, setExpandedResponses] = useState(new Set());
   const [activeTab, setActiveTab] = useState('Answer');
-  const [currentQuery, setCurrentQuery] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [chatResponses, setChatResponses] = useState([]);
   const textareaRef = useRef(null);
-  const queryInputRef = useRef(null);
 
   // Initialize chat responses from props
   useEffect(() => {
     if (existingMessages && existingMessages.length > 0) {
-      // Convert existing messages to response format
       const convertedResponses = existingMessages
         .filter(msg => msg.role === 'assistant')
         .map((msg, index) => ({
           id: `msg_${index}`,
-          query: existingMessages[index * 2]?.content || 'Previous query', // Get corresponding user message
+          query: existingMessages[index * 2]?.content || 'Previous query',
           content: msg.content,
           chart_data: msg.chart_data,
           insights: msg.insights,
           recommendations: msg.recommendations,
+          suggestions: msg.suggestions || msg.smart_suggestions || [], // IMPORTANT: Extract suggestions
           timestamp: msg.timestamp
         }));
       setChatResponses(convertedResponses);
     }
     
-    // Handle initial query for new chats
     if (query && chatId) {
       handleQuerySubmission(query);
     }
   }, [existingMessages, query, chatId]);
 
+  // Clean chart title function
+  const cleanChartTitle = (title) => {
+    if (!title) return 'Data Analysis';
+    
+    // Remove metadata if present
+    if (title.includes('DOMAIN:') || title.includes('USER QUESTION:')) {
+      const userQuestionMatch = title.match(/USER QUESTION:\s*(.+)$/);
+      if (userQuestionMatch) {
+        const question = userQuestionMatch[1].trim();
+        return question.charAt(0).toUpperCase() + question.slice(1);
+      }
+    }
+    
+    // Clean existing title
+    return title.replace(/^Table:\s*/, '').trim();
+  };
+
   // Query submission function
   const handleQuerySubmission = async (queryText) => {
-    if (!queryText.trim() || isSubmitting) return;
+    if (!queryText.trim()) return;
 
-    setIsSubmitting(true);
-    
-    // Add user message to chat immediately
-    const userMessage = {
-      id: `user_${Date.now()}`,
-      role: 'user',
-      content: queryText,
-      timestamp: new Date().toISOString()
-    };
-
-    // Add loading response
     const loadingResponse = {
       id: `loading_${Date.now()}`,
       query: queryText,
@@ -78,7 +80,6 @@ const ResponseInterface = ({
     setChatResponses(prev => [...prev, loadingResponse]);
 
     try {
-      // Make API call to backend
       const response = await fetch('http://localhost:5000/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -92,7 +93,10 @@ const ResponseInterface = ({
         const result = await response.json();
         
         if (result.success) {
-          // Replace loading response with actual result
+          // DEBUG: Log what we're extracting
+          console.log('🔍 Creating actualResponse from result:', result);
+          console.log('🔍 Extracting suggestions:', result.suggestions, 'smart_suggestions:', result.smart_suggestions);
+          
           const actualResponse = {
             id: `response_${Date.now()}`,
             query: queryText,
@@ -100,9 +104,12 @@ const ResponseInterface = ({
             chart_data: result.chart_data || result.visualization,
             insights: result.insights,
             recommendations: result.recommendations,
+            suggestions: result.suggestions || result.smart_suggestions || [], // EXTRACT SUGGESTIONS
             processing_mode: result.processing_mode,
             execution_time: result.execution_time
           };
+          
+          console.log('🔍 actualResponse created with suggestions:', actualResponse.suggestions);
 
           setChatResponses(prev => 
             prev.map(r => r.id === loadingResponse.id ? actualResponse : r)
@@ -116,46 +123,84 @@ const ResponseInterface = ({
     } catch (error) {
       console.error('Query submission error:', error);
       
-      // Replace loading response with error
       const errorResponse = {
         id: `error_${Date.now()}`,
         query: queryText,
         content: `Error: ${error.message}`,
-        isError: true
+        isError: true,
+        suggestions: []
       };
 
       setChatResponses(prev => 
         prev.map(r => r.id === loadingResponse.id ? errorResponse : r)
       );
-    } finally {
-      setIsSubmitting(false);
-      setCurrentQuery(''); // Clear input
     }
   };
 
-  // Handle form submission
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    handleQuerySubmission(currentQuery);
+  // NEW: Follow-Up Questions Component
+  const FollowUpQuestions = ({ suggestions, onQuestionClick }) => {
+    // TEMP DEBUG: Log what we're receiving
+    console.log('🔍 FollowUpQuestions received:', suggestions, 'length:', suggestions?.length);
+    
+    if (!suggestions || suggestions.length === 0) {
+      console.log('❌ FollowUpQuestions returning null - no suggestions');
+      return null;
+    }
+
+    return (
+      <div className="mt-6 p-6 bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl border border-purple-100">
+        <div className="flex items-center space-x-2 mb-4">
+          <MessageCircle className="w-5 h-5 text-purple-600" />
+          <h4 className="text-lg font-semibold text-purple-900">Follow-Up Questions</h4>
+          <div className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+            AI Generated
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {suggestions.slice(0, 6).map((suggestion, index) => (
+            <button
+              key={index}
+              onClick={(e) => {
+                console.log('🔍 Button clicked:', suggestion);
+                e.preventDefault();
+                e.stopPropagation();
+                onQuestionClick(suggestion);
+              }}
+              className="group flex items-center justify-between p-4 bg-white rounded-lg border border-purple-200 hover:border-purple-300 hover:shadow-md transition-all duration-200 text-left cursor-pointer"
+            >
+              <span className="text-sm text-gray-700 group-hover:text-purple-700 font-medium">
+                {suggestion}
+              </span>
+              <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 transition-colors" />
+            </button>
+          ))}
+        </div>
+        
+        {suggestions.length > 6 && (
+          <div className="mt-3 text-center">
+            <span className="text-xs text-purple-600">
+              +{suggestions.length - 6} more suggestions available
+            </span>
+          </div>
+        )}
+      </div>
+    );
   };
 
-  // Handle enter key
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleQuerySubmission(currentQuery);
+  // Handle follow-up question clicks
+  const handleFollowUpClick = (question) => {
+    console.log('🔍 Follow-up question clicked:', question);
+    console.log('🔍 onNewQuery available:', !!onNewQuery);
+    
+    if (onNewQuery) {
+      console.log('🔍 Using onNewQuery callback');
+      onNewQuery(question);
+    } else {
+      console.log('🔍 Using handleQuerySubmission');
+      handleQuerySubmission(question);
     }
   };
-
-  useEffect(() => {
-    if (editingResponseId && textareaRef.current) {
-      textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(
-        textareaRef.current.value.length,
-        textareaRef.current.value.length
-      );
-    }
-  }, [editingResponseId]);
 
   const handleEdit = (responseId) => {
     setEditingResponseId(responseId);
@@ -174,30 +219,16 @@ const ResponseInterface = ({
     navigator.clipboard.writeText(text);
   };
 
-  const toggleExpanded = (responseId) => {
-    setExpandedResponses(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(responseId)) {
-        newSet.delete(responseId);
-      } else {
-        newSet.add(responseId);
-      }
-      return newSet;
-    });
-  };
-
   const handleTabChange = (responseId, newTab) => {
     setActiveTab(newTab);
   };
 
   // Enhanced formatTableValue function
   const formatTableValue = (value, type) => {
-    // Handle null/undefined values
     if (value === null || value === undefined || value === '') {
       return '-';
     }
     
-    // Handle ObjectId or complex objects
     if (typeof value === 'object' && value !== null) {
       if (value.toString && typeof value.toString === 'function') {
         value = value.toString();
@@ -228,9 +259,6 @@ const ResponseInterface = ({
 
   // Fixed renderDataTable function
   const renderDataTable = (data, columns) => {
-    console.log('🔍 Table Debug - Data:', data?.slice(0, 2)); // Debug first 2 rows
-    console.log('🔍 Table Debug - Columns:', columns);
-    
     if (!data || data.length === 0) {
       return (
         <div className="text-center py-8 text-gray-500">
@@ -248,7 +276,7 @@ const ResponseInterface = ({
               <tr>
                 {columns.map((column, index) => (
                   <th
-                    key={column.key || column.field || index} // Support both key and field
+                    key={column.key || column.field || index}
                     className={`px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${
                       column.align === 'right' ? 'text-right' : 
                       column.align === 'center' ? 'text-center' : 'text-left'
@@ -267,19 +295,14 @@ const ResponseInterface = ({
                   className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
                 >
                   {columns.map((column, colIndex) => {
-                    // Try multiple ways to access the data
                     const columnKey = column.key || column.field;
                     let cellValue = row[columnKey];
                     
-                    // If no direct match, try alternative access patterns
                     if (cellValue === undefined || cellValue === null) {
-                      // Try case variations
                       const altKeys = [
                         columnKey?.toLowerCase(),
                         columnKey?.toUpperCase(),
                         columnKey?.replace(/_/g, ''),
-                        columnKey?.replace(/([A-Z])/g, '_$1').toLowerCase(),
-                        // For users table common fields
                         columnKey === 'userId' ? '_id' : null,
                         columnKey === 'emailId' ? 'email' : null,
                         columnKey === 'name' ? 'firstName' : null,
@@ -311,28 +334,9 @@ const ResponseInterface = ({
           </table>
         </div>
         
-        {/* Table summary */}
         <div className="mt-4 px-6 py-3 bg-gray-50 border-t border-gray-200 rounded-b-lg">
           <div className="flex justify-between items-center text-sm text-gray-600">
             <span>Showing {data.length} records</span>
-            <span>
-              {data.length > 0 && columns.some(col => col.type === 'number') && (
-                <>
-                  Total: {columns
-                    .filter(col => col.type === 'number')
-                    .map(col => {
-                      const columnKey = col.key || col.field;
-                      const sum = data.reduce((acc, row) => {
-                        const val = parseFloat(row[columnKey]) || 0;
-                        return acc + val;
-                      }, 0);
-                      return `${col.label || col.header}: ${sum.toLocaleString()}`;
-                    })
-                    .join(', ')
-                  }
-                </>
-              )}
-            </span>
           </div>
         </div>
       </div>
@@ -357,7 +361,6 @@ const ResponseInterface = ({
     } else if (chartData.labels || chartData.datasets) {
       chartDataObj = chartData;
     } else if (chartData.htmlContent || chartData.tableData) {
-      // Special handling for HTML and table formats
       chartDataObj = { labels: [], datasets: [] };
     } else {
       return (
@@ -368,12 +371,9 @@ const ResponseInterface = ({
       );
     }
 
-    // Defensive data extraction with fallbacks
     const labels = chartDataObj.labels || [];
     const datasets = chartDataObj.datasets || [];
     const data = datasets.length > 0 ? (datasets[0]?.data || []) : [];
-    
-    // Safety check for maxValue calculation
     const numericData = data.filter(val => typeof val === 'number' && !isNaN(val));
     const maxValue = numericData.length > 0 ? Math.max(...numericData) : 0;
     const chartType = chartData.type || chartData.chartType || 'bar';
@@ -411,153 +411,10 @@ const ResponseInterface = ({
       );
     };
 
-    const renderPieChart = () => {
-      if (labels.length === 0 || data.length === 0) {
-        return <div className="text-center text-gray-500 py-8">No data available for chart</div>;
-      }
-
-      const total = data.reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
-      const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316'];
-      
-      return (
-        <div className="flex flex-col lg:flex-row items-center space-y-4 lg:space-y-0 lg:space-x-8">
-          <div className="w-64 h-64">
-            <svg viewBox="0 0 200 200" className="w-full h-full">
-              {data.map((value, index) => {
-                const percentage = total > 0 ? (value / total) * 100 : 0;
-                const angle = (percentage / 100) * 360;
-                const startAngle = data.slice(0, index).reduce((sum, val) => sum + ((val / total) * 360), 0);
-                
-                const x1 = 100 + 80 * Math.cos((startAngle - 90) * Math.PI / 180);
-                const y1 = 100 + 80 * Math.sin((startAngle - 90) * Math.PI / 180);
-                const x2 = 100 + 80 * Math.cos((startAngle + angle - 90) * Math.PI / 180);
-                const y2 = 100 + 80 * Math.sin((startAngle + angle - 90) * Math.PI / 180);
-                
-                const largeArcFlag = angle > 180 ? 1 : 0;
-                const pathData = `M 100 100 L ${x1} ${y1} A 80 80 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
-                
-                return (
-                  <path
-                    key={index}
-                    d={pathData}
-                    fill={colors[index % colors.length]}
-                    stroke="white"
-                    strokeWidth="2"
-                  />
-                );
-              })}
-            </svg>
-          </div>
-          <div className="space-y-2">
-            {labels.map((label, index) => (
-              <div key={index} className="flex items-center space-x-3">
-                <div 
-                  className="w-4 h-4 rounded"
-                  style={{ backgroundColor: colors[index % colors.length] }}
-                />
-                <span className="text-sm font-medium">{label}</span>
-                <span className="text-sm text-gray-500">
-                  {typeof data[index] === 'number' ? data[index].toLocaleString() : data[index]}
-                  {total > 0 && ` (${((data[index] / total) * 100).toFixed(1)}%)`}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    };
-
-    const renderLineChart = () => {
-      if (labels.length === 0 || data.length === 0) {
-        return <div className="text-center text-gray-500 py-8">No data available for chart</div>;
-      }
-
-      const numericData = data.filter(val => typeof val === 'number' && !isNaN(val));
-      const minValue = Math.min(...numericData);
-      const maxValue = Math.max(...numericData);
-      const range = maxValue - minValue || 1;
-
-      return (
-        <div className="w-full h-64">
-          <svg viewBox="0 0 400 200" className="w-full h-full">
-            <defs>
-              <linearGradient id="lineGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.3"/>
-                <stop offset="100%" stopColor="#3B82F6" stopOpacity="0.1"/>
-              </linearGradient>
-            </defs>
-            
-            {/* Grid lines */}
-            {[0, 1, 2, 3, 4].map(i => (
-              <line
-                key={i}
-                x1="50"
-                y1={40 + i * 32}
-                x2="350"
-                y2={40 + i * 32}
-                stroke="#E5E7EB"
-                strokeWidth="1"
-              />
-            ))}
-            
-            {/* Data line */}
-            <polyline
-              fill="none"
-              stroke="#3B82F6"
-              strokeWidth="3"
-              points={data.map((value, index) => {
-                const x = 50 + (index / (data.length - 1)) * 300;
-                const y = 200 - 40 - ((value - minValue) / range) * 120;
-                return `${x},${y}`;
-              }).join(' ')}
-            />
-            
-            {/* Data points */}
-            {data.map((value, index) => {
-              const x = 50 + (index / (data.length - 1)) * 300;
-              const y = 200 - 40 - ((value - minValue) / range) * 120;
-              return (
-                <circle
-                  key={index}
-                  cx={x}
-                  cy={y}
-                  r="4"
-                  fill="#3B82F6"
-                  stroke="white"
-                  strokeWidth="2"
-                />
-              );
-            })}
-            
-            {/* Labels */}
-            {labels.map((label, index) => {
-              const x = 50 + (index / (data.length - 1)) * 300;
-              return (
-                <text
-                  key={index}
-                  x={x}
-                  y="190"
-                  textAnchor="middle"
-                  className="fill-gray-600 text-xs"
-                >
-                  {label}
-                </text>
-              );
-            })}
-          </svg>
-        </div>
-      );
-    };
-
     const renderTable = () => {
       const tableData = chartData.tableData || [];
       const columns = chartData.columns || [];
       
-      console.log('🔍 DEBUG - Chart Data:', chartData);
-      console.log('🔍 DEBUG - Table Data:', tableData);
-      console.log('🔍 DEBUG - Columns:', columns);
-      
-      // If no specific table data, convert chart data to table format
       if (tableData.length === 0 && labels && data) {
         const convertedData = labels.map((label, index) => ({
           category: label,
@@ -575,65 +432,10 @@ const ResponseInterface = ({
       return renderDataTable(tableData, columns);
     };
 
-    const renderAdvancedChart = (type) => {
-      const chartTypeInfo = {
-        scatter: { icon: '📈', description: 'Scatter Plot - Correlation analysis' },
-        bubble: { icon: '🫧', description: 'Bubble Chart - 3D data visualization' },
-        radar: { icon: '🕸️', description: 'Radar Chart - Multi-dimensional comparison' },
-        polar: { icon: '🌀', description: 'Polar Chart - Circular data representation' },
-        area: { icon: '📈', description: 'Area Chart - Filled line chart' },
-        histogram: { icon: '📊', description: 'Histogram - Data distribution' },
-        heatmap: { icon: '🔥', description: 'Heatmap - Intensity visualization' },
-        treemap: { icon: '🗂️', description: 'Treemap - Hierarchical data' },
-        sankey: { icon: '🌊', description: 'Sankey Diagram - Flow visualization' },
-        timeline: { icon: '⏰', description: 'Timeline - Sequential events' },
-        gauge: { icon: '⏱️', description: 'Gauge - Progress indicator' },
-        funnel: { icon: '🔽', description: 'Funnel Chart - Conversion process' },
-        waterfall: { icon: '💧', description: 'Waterfall - Sequential changes' },
-        candlestick: { icon: '📊', description: 'Candlestick - Financial data' },
-        map: { icon: '🗺️', description: 'Map - Geographic visualization' }
-      };
-
-      const info = chartTypeInfo[type] || { icon: '📊', description: 'Advanced Chart' };
-
-      return (
-        <div className="text-center py-12">
-          <div className="text-6xl mb-4">{info.icon}</div>
-          <h3 className="text-xl font-semibold text-gray-800 mb-2">{info.description}</h3>
-          <p className="text-gray-600 mb-4">Advanced chart rendering coming soon!</p>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md mx-auto">
-            <p className="text-sm text-blue-800">
-              This chart type is supported by the backend but requires additional frontend implementation.
-            </p>
-          </div>
-        </div>
-      );
-    };
-
     const renderChart = () => {
       switch (chartType) {
         case 'bar': return renderBarChart();
-        case 'pie': return renderPieChart();
-        case 'line': return renderLineChart();
         case 'table': return renderTable();
-        case 'doughnut': return renderPieChart(); // Same as pie for now
-        case 'scatter': return renderAdvancedChart('scatter');
-        case 'bubble': return renderAdvancedChart('bubble');
-        case 'radar': return renderAdvancedChart('radar');
-        case 'polar': return renderAdvancedChart('polar');
-        case 'area': return renderAdvancedChart('area');
-        case 'histogram': return renderAdvancedChart('histogram');
-        case 'heatmap': return renderAdvancedChart('heatmap');
-        case 'treemap': return renderAdvancedChart('treemap');
-        case 'sankey': return renderAdvancedChart('sankey');
-        case 'timeline': return renderAdvancedChart('timeline');
-        case 'gauge': return renderAdvancedChart('gauge');
-        case 'funnel': return renderAdvancedChart('funnel');
-        case 'waterfall': return renderAdvancedChart('waterfall');
-        case 'candlestick': return renderAdvancedChart('candlestick');
-        case 'map': return renderAdvancedChart('map');
-        case 'custom': return renderAdvancedChart('custom');
-        case 'mixed': return renderAdvancedChart('mixed');
         default: return renderBarChart();
       }
     };
@@ -643,17 +445,19 @@ const ResponseInterface = ({
         bar: <BarChart3 className="w-4 h-4" />,
         pie: <PieChart className="w-4 h-4" />,
         line: <TrendingUp className="w-4 h-4" />,
-        table: <TableIcon className="w-4 h-4" />,
-        doughnut: <PieChart className="w-4 h-4" />
+        table: <TableIcon className="w-4 h-4" />
       };
       return iconMap[chartType] || <BarChart3 className="w-4 h-4" />;
     };
+
+    // FIXED: Clean the chart title
+    const cleanTitle = cleanChartTitle(chartData.options?.plugins?.title?.text || chartData.title);
 
     return (
       <div className="mt-8 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between p-6 border-b border-gray-100">
           <h4 className="text-xl font-semibold text-gray-900">
-            {chartData.options?.plugins?.title?.text || 'Analytics Chart'}
+            {cleanTitle}
           </h4>
           <div className="flex items-center space-x-3 text-sm text-gray-500">
             {getChartTypeIcon()}
@@ -679,7 +483,6 @@ const ResponseInterface = ({
 
   // Single Response Component
   const ResponseComponent = ({ response, index }) => {
-    // Handle missing response object
     if (!response) {
       return (
         <div className="text-center py-8 text-gray-400">
@@ -690,7 +493,7 @@ const ResponseInterface = ({
 
     const isEditing = editingResponseId === response.id;
     const mockSources = [
-      { id: 1, title: 'MongoDB Analytics Database', url: 'mongodb://localhost:27017/analytics_db', favicon: '📊', description: 'Your MongoDB analytics database with sales, customer, and product data.' },
+      { id: 1, title: 'MongoDB Analytics Database', url: 'mongodb://localhost:27017/genaiexeco-development', favicon: '📊', description: 'Your MongoDB analytics database with sales, customer, and product data.' },
       { id: 2, title: 'Backend Processing Engine', url: 'localhost:5000/api/query', favicon: '⚙️', description: 'Python Flask backend with Gemini AI integration for query processing.' },
       { id: 3, title: 'Chart Generation System', url: 'chart.generator.local', favicon: '📈', description: 'Automated chart generation based on data patterns and query analysis.' }
     ];
@@ -789,65 +592,18 @@ const ResponseInterface = ({
               <ChartDisplay chartData={response.chart_data} />
             )}
 
-            {/* Insights Section */}
-            {response?.insights && Array.isArray(response.insights) && response.insights.length > 0 && (
-              <div className="mt-8 p-6 bg-blue-50 rounded-xl border border-blue-100">
-                <div className="flex items-center space-x-2 mb-4">
-                  <Zap className="w-5 h-5 text-blue-600" />
-                  <h4 className="text-lg font-semibold text-blue-900">Key Insights</h4>
-                </div>
-                <ul className="space-y-2">
-                  {response.insights.map((insight, idx) => (
-                    <li key={idx} className="flex items-start space-x-3">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0" />
-                      <span className="text-blue-800">{insight}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
 
-            {/* Recommendations Section */}
-            {response?.recommendations && Array.isArray(response.recommendations) && response.recommendations.length > 0 && (
-              <div className="mt-6 p-6 bg-green-50 rounded-xl border border-green-100">
-                <div className="flex items-center space-x-2 mb-4">
-                  <Target className="w-5 h-5 text-green-600" />
-                  <h4 className="text-lg font-semibold text-green-900">Recommendations</h4>
-                </div>
-                <ul className="space-y-2">
-                  {response.recommendations.map((rec, idx) => (
-                    <li key={idx} className="flex items-start space-x-3">
-                      <div className="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0" />
-                      <span className="text-green-800">{rec}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Answer Validation */}
-            {response?.validation && (
-              <div className="mt-8 p-6 bg-gray-50 rounded-xl border border-gray-200">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-lg font-semibold text-gray-900">Answer Validation</h4>
-                  <div className="flex items-center space-x-2">
-                    <div className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                      {response.validation.confidence || '85%'} confidence
-                    </div>
-                  </div>
-                </div>
-                <ul className="space-y-2">
-                  <li className="flex items-center space-x-3">
-                    <div className="w-2 h-2 bg-green-500 rounded-full" />
-                    <span className="text-gray-700">Data processed successfully from backend</span>
-                  </li>
-                  <li className="flex items-center space-x-3">
-                    <div className="w-2 h-2 bg-green-500 rounded-full" />
-                    <span className="text-gray-700">Response generated successfully</span>
-                  </li>
-                </ul>
-              </div>
-            )}
+            {/* NEW: Follow-Up Questions Component */}
+            {(() => {
+              const suggestionData = response?.suggestions || response?.smart_suggestions || [];
+              console.log('🔍 ResponseComponent passing suggestions:', suggestionData, 'from response:', response);
+              return (
+                <FollowUpQuestions 
+                  suggestions={suggestionData} 
+                  onQuestionClick={handleFollowUpClick}
+                />
+              );
+            })()}
           </div>
         )}
 
@@ -932,9 +688,9 @@ const ResponseInterface = ({
   const displayResponses = chatResponses.length > 0 ? chatResponses : responses;
   const hasResponses = Array.isArray(displayResponses) && displayResponses.length > 0;
 
-  // Main render
+  // Main render - REMOVED ALL INPUT FIELDS
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex flex-col h-full bg-gray-50">
       {/* Chat Header */}
       {chatId && (
         <div className="bg-white border-b border-gray-200 px-6 py-4">
@@ -955,7 +711,7 @@ const ResponseInterface = ({
         </div>
       )}
 
-      {/* Messages Area */}
+      {/* Messages Area - NO INPUT FIELDS HERE */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {isLoading ? (
           <div className="space-y-6">
@@ -983,55 +739,8 @@ const ResponseInterface = ({
         )}
       </div>
 
-      {/* Query Input Area */}
-      <div className="bg-white border-t border-gray-200 px-6 py-4">
-        <form onSubmit={handleSubmit} className="flex items-center space-x-4">
-          <div className="flex-1 relative">
-            <input
-              ref={queryInputRef}
-              type="text"
-              value={currentQuery}
-              onChange={(e) => setCurrentQuery(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask a question about your data..."
-              disabled={isSubmitting}
-              className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-            />
-            {isSubmitting && (
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-              </div>
-            )}
-          </div>
-          <button
-            type="submit"
-            disabled={!currentQuery.trim() || isSubmitting}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2 transition-colors"
-          >
-            <Send className="w-4 h-4" />
-            <span>{isSubmitting ? 'Sending...' : 'Send'}</span>
-          </button>
-        </form>
-        
-        {/* Quick Examples */}
-        <div className="mt-3 flex flex-wrap gap-2">
-          {[
-            'List all users',
-            'Show sales by category', 
-            'Product performance chart',
-            'Revenue trends this month'
-          ].map((example) => (
-            <button
-              key={example}
-              onClick={() => setCurrentQuery(example)}
-              disabled={isSubmitting}
-              className="px-3 py-1 text-xs bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {example}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* REMOVED: Query Input Area - This was the duplicate input field */}
+      {/* The main input field should be handled by the parent component (ChatViewPage) */}
     </div>
   );
 };

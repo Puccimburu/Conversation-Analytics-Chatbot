@@ -22,14 +22,9 @@ class BulletproofGeminiClient:
         self.model = genai.GenerativeModel('gemini-1.5-flash')
         self.max_retries = 3
         
-        # Test the connection and set availability
-        try:
-            test_response = self.model.generate_content("Test")
-            self.available = True
-            logger.info("✅ Gemini client initialized and tested")
-        except Exception as e:
-            logger.error(f"❌ Gemini test failed: {e}")
-            self.available = False
+        # Skip test for faster startup - validate on first real request
+        self.available = True  # Assume available, will be validated on first use
+        logger.info("✅ Gemini client initialized (test skipped for faster startup)")
     
     async def generate_query(self, user_question: str, database_schema: Dict) -> Dict:
         """
@@ -271,6 +266,16 @@ class BulletproofGeminiClient:
             # Clean up extra whitespace and trailing commas
             json_str = re.sub(r',\s*}', '}', json_str)
             json_str = re.sub(r',\s*]', ']', json_str)
+            
+            # Fix MongoDB-specific syntax that's not valid JSON
+            # Convert ISODate("...") to just the string date
+            json_str = re.sub(r'ISODate\("([^"]+)"\)', r'"\1"', json_str)
+            
+            # Convert ObjectId("...") to just the string
+            json_str = re.sub(r'ObjectId\("([^"]+)"\)', r'"\1"', json_str)
+            
+            # Convert NumberLong(...) to just the number
+            json_str = re.sub(r'NumberLong\((\d+)\)', r'\1', json_str)
             
             try:
                 return json.loads(json_str)

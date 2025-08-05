@@ -112,7 +112,8 @@ const ChatViewPage = () => {
           content: '',
           chart_data: null,
           insights: [],
-          recommendations: []
+          recommendations: [],
+          suggestions: [] // ✅ ADD SUGGESTIONS
         };
       } else if (msg.role === 'assistant' && currentResponse) {
         // Complete current response
@@ -120,6 +121,7 @@ const ChatViewPage = () => {
         currentResponse.chart_data = msg.chart_data;
         currentResponse.insights = msg.insights || [];
         currentResponse.recommendations = msg.recommendations || [];
+        currentResponse.suggestions = msg.suggestions || msg.smart_suggestions || []; // ✅ ADD SUGGESTIONS
       }
     });
 
@@ -175,6 +177,7 @@ const ChatViewPage = () => {
             chart_data: data.visualization?.chart_config || data.chart_data,
             insights: data.insights || [],
             recommendations: data.recommendations || [],
+            suggestions: data.suggestions || data.smart_suggestions || [], // ✅ ADD SUGGESTIONS
             isLoading: false,
             success: data.success
           } : r
@@ -314,6 +317,14 @@ const ChatViewPage = () => {
               onEditQuery={(responseId, newQuery) => {
                 // Handle query editing if needed
                 console.log('Edit query:', responseId, newQuery);
+              }}
+              onNewQuery={(question) => {
+                // Handle follow-up questions
+                console.log('Follow-up question from ResponseInterface:', question);
+                setCurrentQuery(question);
+                setTimeout(() => {
+                  submitQuery(question);
+                }, 100);
               }}
               isLoading={false}
             />

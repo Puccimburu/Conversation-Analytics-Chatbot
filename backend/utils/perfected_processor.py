@@ -138,6 +138,9 @@ class PerfectedTwoStageProcessor:
                 logger.error("Invalid query data - missing collection or pipeline")
                 return None
             
+            # Convert date strings back to datetime objects for MongoDB
+            pipeline = self._process_pipeline_dates(pipeline)
+            
             collection = self.db[collection_name]
             results = list(collection.aggregate(pipeline))
             
@@ -153,6 +156,33 @@ class PerfectedTwoStageProcessor:
         except Exception as e:
             logger.error(f"Database query execution failed: {e}")
             return None
+    
+    def _process_pipeline_dates(self, pipeline: list) -> list:
+        """Convert date strings in pipeline back to datetime objects"""
+        from datetime import datetime
+        import re
+        
+        def convert_dates_recursive(obj):
+            if isinstance(obj, dict):
+                converted = {}
+                for key, value in obj.items():
+                    converted[key] = convert_dates_recursive(value)
+                return converted
+            elif isinstance(obj, list):
+                return [convert_dates_recursive(item) for item in obj]
+            elif isinstance(obj, str):
+                # Check if it's an ISO date string
+                if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z?$', obj):
+                    try:
+                        # Parse ISO date string to datetime
+                        return datetime.fromisoformat(obj.replace('Z', '+00:00'))
+                    except ValueError:
+                        return obj
+                return obj
+            else:
+                return obj
+        
+        return convert_dates_recursive(pipeline)
     
     def _clean_mongodb_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Clean MongoDB result by converting ObjectIds to strings"""
