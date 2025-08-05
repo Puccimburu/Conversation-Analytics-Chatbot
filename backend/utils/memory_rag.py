@@ -1,7 +1,7 @@
-# backend/utils/memory_rag.py - COMPLETE FIXED VERSION
+# backend/utils/memory_rag.py - FIXED VERSION WITH COMPLETE LOGGING
 """
-Streamlined Memory RAG System for Conversational AI
-Reduced from 800+ lines to ~200 lines while retaining core functionality
+Memory RAG System with Complete Chat History Logging
+Fixed to properly log ALL memory storage operations
 """
 
 import logging
@@ -68,85 +68,58 @@ Make questions practical and directly related to what the user just saw.
 Return only the questions, one per line, no numbering.
 """
             
+            # Generate suggestions using Gemini
             response = self.gemini_client.model.generate_content(prompt)
-            if response and hasattr(response, 'text'):
-                suggestions = self._parse_suggestions(response.text)
+            if response and response.strip():
+                suggestions = [s.strip() for s in response.strip().split('\n') if s.strip()]
+                suggestions = suggestions[:3]  # Take first 3
                 logger.info(f"🎯 Generated {len(suggestions)} smart suggestions: {suggestions}")
-                return suggestions[:3] if suggestions else self._get_contextual_suggestions(question)
+                return suggestions
             
         except Exception as e:
-            logger.warning(f"Smart suggestion generation failed: {e}")
+            logger.warning(f"Gemini suggestion generation failed: {e}")
         
+        # Fallback to contextual suggestions
         return self._get_contextual_suggestions(question)
     
     def _extract_data_context(self, result: Dict) -> str:
-        """Extract data context for better suggestion generation"""
-        parts = []
+        """Extract relevant data context for suggestion generation"""
+        context_parts = []
         
-        # Get collection/table info
-        if result.get('query_data', {}).get('collection'):
-            collection = result['query_data']['collection']
-            parts.append(f"Collection: {collection}")
+        if result.get('results_count'):
+            context_parts.append(f"Showing {result['results_count']} results")
         
-        # Get result count
-        result_count = result.get('results_count', 0)
-        if result_count:
-            parts.append(f"Showing {result_count} records")
-        
-        # Get data fields if available (from chart data)
         if result.get('chart_data', {}).get('tableData'):
             table_data = result['chart_data']['tableData']
             if table_data and len(table_data) > 0:
-                sample_fields = list(table_data[0].keys())
-                parts.append(f"Fields: {', '.join(sample_fields[:5])}")
+                fields = list(table_data[0].keys())
+                context_parts.append(f"Fields: {', '.join(fields[:5])}")
         
-        return "; ".join(parts) if parts else "Data analysis completed"
-    
-    def _extract_result_summary(self, result: Dict) -> str:
-        """Extract key info from result"""
-        parts = []
-        if result.get('query_data', {}).get('collection'):
-            parts.append(f"Collection: {result['query_data']['collection']}")
-        if result.get('raw_results'):
-            parts.append(f"Records: {len(result['raw_results'])}")
-        return "; ".join(parts) if parts else "Analysis completed"
-    
-    def _parse_suggestions(self, text: str) -> List[str]:
-        """Parse suggestions from Gemini response"""
-        lines = [line.strip() for line in text.strip().split('\n')]
-        suggestions = []
-        for line in lines:
-            line = re.sub(r'^\d+[\.\)]\s*|^[-•*]\s*', '', line).strip('"\'')
-            if line and len(line) > 10 and '?' in line:
-                suggestions.append(line)
-        return suggestions
+        if result.get('insights'):
+            context_parts.append(f"Key insight: {result['insights'][0][:100]}")
+        
+        return "; ".join(context_parts) if context_parts else "General query results"
     
     def _get_contextual_suggestions(self, question: str) -> List[str]:
-        """Generate context-aware fallback suggestions"""
+        """Generate context-aware suggestions based on question keywords"""
         question_lower = question.lower()
         
-        if any(word in question_lower for word in ['user', 'users', 'people', 'account']):
+        if any(word in question_lower for word in ['user', 'users', 'people', 'person']):
             return [
-                'Which users are admins?',
-                'Show me only active users',
-                'Who are the most recently created users?'
+                'Can I filter this list by creation date?',
+                'What roles are associated with these users?',
+                'How can I export this user list to a CSV file?'
             ]
-        elif any(word in question_lower for word in ['admin', 'administrator', 'role']):
+        elif any(word in question_lower for word in ['document', 'documents', 'file', 'files']):
             return [
-                'List all admin users',
-                'Show users by role type',
-                'Who has the most permissions?'
+                'What is the confidence level distribution?',
+                'Show me documents processed in the last week',
+                'Group these documents by extraction status'
             ]
-        elif any(word in question_lower for word in ['document', 'file', 'upload']):
+        elif any(word in question_lower for word in ['trend', 'over time', 'daily', 'monthly']):
             return [
-                'Which documents were uploaded recently?',
-                'Show documents by type',
-                'Which users uploaded the most documents?'
-            ]
-        elif any(word in question_lower for word in ['activity', 'active', 'recent']):
-            return [
-                'Show recent user activity',
-                'Which users are most active?',
+                'Compare this with the previous period',
+                'Break this down by week instead of month',
                 'What happened in the last 30 days?'
             ]
         elif any(word in question_lower for word in ['data', 'records', 'entries']):
@@ -163,7 +136,7 @@ Return only the questions, one per line, no numbering.
         ]
 
 class MemoryRAGManager:
-    """Simplified Memory RAG system"""
+    """Simplified Memory RAG system with complete logging"""
     
     def __init__(self, database, gemini_client=None):
         self.db = database
@@ -185,7 +158,7 @@ class MemoryRAGManager:
             logger.warning(f"Could not create indexes: {e}")
     
     async def store_memory(self, chat_id: str, content: str, content_type: str, query_context: dict = None) -> str:
-        """Store a memory fragment with optional query context"""
+        """Store a memory fragment with optional query context - NOW WITH COMPLETE LOGGING"""
         try:
             fragment_id = self._generate_id(chat_id, content)
             keywords = self._extract_keywords(content)
@@ -209,7 +182,15 @@ class MemoryRAGManager:
                     "fields": query_context.get("fields", [])
                 }
             
+            # INSERT INTO DATABASE
             self.memory_collection.insert_one(memory)
+            
+            # 🔥 FIXED: LOG ALL MEMORY STORAGE OPERATIONS 🔥
+            content_preview = content[:100] + "..." if len(content) > 100 else content
+            logger.info(f"📝 Stored {content_type} memory: {fragment_id} for chat {chat_id}")
+            logger.info(f"🧠 Stored {content_type.upper()} in memory: {fragment_id} - Content: {content_preview}")
+            
+            # Cleanup old memories
             await self._cleanup_old_memories(chat_id)
             return fragment_id
             
@@ -245,57 +226,60 @@ class MemoryRAGManager:
             # Format context
             context_parts = ["DOMAIN: AI Operations & Document Intelligence"]
             
-            # Add current data context if available
+            # Add data context if available
             if recent_data_context and recent_data_context.get('query_context'):
-                qc = recent_data_context['query_context']
-                context_parts.append(f"CURRENT DATA: {qc.get('collection', 'unknown')} collection, {qc.get('result_count', 0)} records")
-                if qc.get('fields'):
-                    context_parts.append(f"AVAILABLE FIELDS: {', '.join(qc['fields'][:5])}")
+                ctx = recent_data_context['query_context']
+                context_parts.append(f"RECENT CONTEXT: User recently viewed {ctx.get('collection', 'data')} ({ctx.get('result_count', 0)} items)")
             
-            # Add recent conversation context
+            # Add relevant memories
             if memories:
-                context_parts.append("RECENT CONTEXT:")
-                for memory in memories[:2]:
-                    snippet = (memory['content'][:60] + "...") if len(memory['content']) > 60 else memory['content']
-                    context_parts.append(f"- {snippet}")
+                context_parts.append("RELEVANT CONTEXT:")
+                for memory in memories:
+                    content_preview = memory['content'][:150]
+                    context_parts.append(f"- {memory['content_type'].title()}: {content_preview}")
             
+            # Add the current question
             context_parts.append(f"USER QUESTION: {question}")
+            
             return "\n".join(context_parts)
             
         except Exception as e:
-            logger.error(f"Failed to get context: {e}")
-            return f"DOMAIN: AI Operations & Document Intelligence\nUSER QUESTION: {question}"
+            logger.warning(f"Context retrieval failed: {e}")
+            return question
     
     def _extract_keywords(self, content: str) -> List[str]:
-        """Extract GenAI operation keywords"""
-        content_lower = content.lower()
+        """Extract meaningful keywords from content"""
+        # Remove common words and extract meaningful terms
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'cannot', 'this', 'that', 'these', 'those'}
         
-        # GenAI-specific keywords
-        keywords = [
-            'cost', 'spending', 'token', 'model', 'document', 'extraction',
-            'confidence', 'compliance', 'obligation', 'agent', 'batch',
-            'processing', 'efficiency', 'performance', 'quality', 'risk'
-        ]
+        # Extract words (alphanumeric + basic punctuation)
+        words = re.findall(r'\b[a-zA-Z0-9_]+\b', content.lower())
         
-        found = [kw for kw in keywords if kw in content_lower]
+        # Filter meaningful keywords
+        keywords = [w for w in words if len(w) > 2 and w not in stop_words]
         
-        # Add numbers and percentages
-        numbers = re.findall(r'\$[\d,]+|\d+%|\d+\s*(?:tokens|documents|batches)', content_lower)
-        found.extend(numbers)
-        
-        return list(set(found))[:8]
+        return list(set(keywords))[:10]  # Unique keywords, max 10
     
     def _calculate_importance(self, content: str, content_type: str) -> float:
-        """Calculate importance score"""
-        scores = {'question': 0.7, 'answer': 0.8, 'fact': 0.6}
-        base_score = scores.get(content_type, 0.5)
+        """Calculate importance score for memory prioritization"""
+        # Base scores by type
+        base_scores = {
+            'question': 0.6,
+            'answer': 0.7,
+            'fact': 0.8
+        }
         
-        # Boost for high-value keywords
-        high_value = ['critical', 'urgent', 'error', 'cost', 'risk', 'compliance']
-        boost = sum(0.1 for word in high_value if word in content.lower())
+        base_score = base_scores.get(content_type, 0.5)
         
-        # Boost for numbers (specific metrics are valuable)
-        if re.search(r'\d+(?:\.\d+)?[%$]?', content):
+        # Boost for specific patterns
+        boost = 0.0
+        if any(word in content.lower() for word in ['error', 'issue', 'problem', 'fail']):
+            boost += 0.2
+        if any(word in content.lower() for word in ['important', 'critical', 'urgent']):
+            boost += 0.2
+        if len(content) > 200:  # Detailed content
+            boost += 0.1
+        if re.search(r'\d+', content):  # Contains numbers
             boost += 0.1
         
         return min(base_score + boost, 1.0)
@@ -331,6 +315,35 @@ class MemoryRAGManager:
         except Exception as e:
             logger.warning(f"Cleanup failed: {e}")
 
+    async def get_chat_history(self, chat_id: str, limit: int = 10) -> List[Dict]:
+        """Get recent chat history for debugging"""
+        try:
+            memories = list(self.memory_collection.find({"chat_id": chat_id})
+                          .sort([("timestamp", -1)])
+                          .limit(limit))
+            return memories
+        except Exception as e:
+            logger.error(f"Failed to get chat history: {e}")
+            return []
+
+    async def get_memory_stats(self, chat_id: str) -> Dict[str, int]:
+        """Get memory statistics for debugging"""
+        try:
+            pipeline = [
+                {"$match": {"chat_id": chat_id}},
+                {"$group": {
+                    "_id": "$content_type",
+                    "count": {"$sum": 1}
+                }}
+            ]
+            stats = {}
+            for result in self.memory_collection.aggregate(pipeline):
+                stats[result["_id"]] = result["count"]
+            return stats
+        except Exception as e:
+            logger.error(f"Failed to get memory stats: {e}")
+            return {}
+
 class MemoryEnhancedProcessor:
     """Simplified memory-enhanced processor"""
     
@@ -340,47 +353,11 @@ class MemoryEnhancedProcessor:
         self.suggestion_generator = SmartSuggestionGenerator(gemini_client) if gemini_client else None
     
     def _clean_memory_metadata_from_response(self, result: Dict[str, Any], original_question: str) -> Dict[str, Any]:
-        """Clean memory metadata from response to avoid user-facing clutter"""
-        if not isinstance(result, dict):
-            return result
-        
-        # Clean chart title if it contains memory metadata
-        chart_config = result.get('visualization', {}).get('chart_config', {})
-        if chart_config:
-            # Check multiple possible title locations
-            title_paths = [
-                ['options', 'plugins', 'title', 'text'],
-                ['title'],
-                ['options', 'title', 'text']
-            ]
-            
-            for path in title_paths:
-                current = chart_config
-                for key in path[:-1]:
-                    if isinstance(current, dict) and key in current:
-                        current = current[key]
-                    else:
-                        current = None
-                        break
-                
-                if current and isinstance(current, dict) and path[-1] in current:
-                    title = current[path[-1]]
-                    if isinstance(title, str) and ('DOMAIN:' in title or 'USER QUESTION:' in title):
-                        # Extract just the user question part
-                        user_question_match = re.search(r'USER QUESTION:\s*(.+)$', title)
-                        if user_question_match:
-                            clean_title = user_question_match.group(1).strip()
-                            current[path[-1]] = clean_title
-                        else:
-                            # Fallback to original question
-                            current[path[-1]] = original_question.capitalize()
-        
-        # Clean summary if it contains metadata
-        if result.get('summary') and ('DOMAIN:' in result['summary'] or 'RELEVANT CONTEXT:' in result['summary']):
-            # Extract just the core summary without metadata
-            lines = result['summary'].split('\n')
+        """Clean memory metadata from user-facing response"""
+        if result.get('summary'):
             clean_lines = []
-            for line in lines:
+            for line in result['summary'].split('\n'):
+                # Remove lines that contain memory context metadata
                 if not any(prefix in line for prefix in ['DOMAIN:', 'RELEVANT CONTEXT:', 'RECENT TOPICS:', 'USER QUESTION:']):
                     clean_lines.append(line)
             
@@ -408,8 +385,9 @@ class MemoryEnhancedProcessor:
     async def process_with_memory(self, question: str, chat_id: str) -> Dict[str, Any]:
         """Process question with memory context"""
         try:
-            # Store user question
-            await self.memory_manager.store_memory(chat_id, question, 'question')
+            # 🔥 CRITICAL FIX: Store user question with logging
+            question_fragment_id = await self.memory_manager.store_memory(chat_id, question, 'question')
+            logger.info(f"💬 USER QUESTION stored: {question_fragment_id} - '{question[:50]}...'")
             
             # Get conversation context (for AI processing only)
             enhanced_question = await self.memory_manager.get_conversation_context(chat_id, question)
@@ -443,7 +421,18 @@ class MemoryEnhancedProcessor:
                             "fields": sample_fields[:10]  # Store field names for context
                         }
                 
-                await self.memory_manager.store_memory(chat_id, response_content, 'answer', query_context)
+                answer_fragment_id = await self.memory_manager.store_memory(chat_id, response_content, 'answer', query_context)
+                logger.info(f"🤖 AI ANSWER stored: {answer_fragment_id} - Summary: {response_content[:50]}...")
+                
+                # Store insights as separate facts
+                if result.get('insights'):
+                    for insight in result['insights']:
+                        insight_fragment_id = await self.memory_manager.store_memory(
+                            chat_id, 
+                            f"Insight: {insight}", 
+                            'fact'
+                        )
+                        logger.info(f"💡 INSIGHT stored: {insight_fragment_id} - {insight[:50]}...")
             
             # Generate smart suggestions (use original question, not enhanced)
             if self.suggestion_generator:
@@ -458,7 +447,9 @@ class MemoryEnhancedProcessor:
             # Add memory metadata (for internal use)
             result['memory_context'] = {
                 'enhanced_with_memory': True,
-                'chat_id': chat_id
+                'chat_id': chat_id,
+                'question_fragment_id': question_fragment_id,
+                'answer_fragment_id': result.get('answer_fragment_id')
             }
             
             # Debug: Log final result structure
