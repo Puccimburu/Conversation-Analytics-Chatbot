@@ -1,6 +1,7 @@
 # backend/utils/perfected_processor.py
 
 import logging
+import re
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from bson import ObjectId
@@ -71,6 +72,9 @@ class PerfectedTwoStageProcessor:
                         "recommendations": viz_data.get("recommendations", ["AI-powered recommendations"]),
                         "results_count": len(raw_results),
                         "execution_time": execution_time,
+                        # NEW: Multi-output support
+                        "outputs": viz_data.get("outputs", []),
+                        "primary_insights": viz_data.get("primary_insights", viz_data.get("insights", [])),
                         "query_source": "gemini_two_stage_perfect",
                         "ai_powered": True
                     }
@@ -134,12 +138,18 @@ class PerfectedTwoStageProcessor:
             collection_name = query_data.get("collection")
             pipeline = query_data.get("pipeline", [])
             
+            # Fix common collection name variants
+            collection_name = self._fix_collection_name(collection_name)
+            
             if not collection_name or not pipeline:
                 logger.error("Invalid query data - missing collection or pipeline")
                 return None
             
             # Convert date strings back to datetime objects for MongoDB
             pipeline = self._process_pipeline_dates(pipeline)
+            
+            # Apply fuzzy matching for better search results
+            pipeline = self._apply_fuzzy_matching(pipeline)
             
             collection = self.db[collection_name]
             results = list(collection.aggregate(pipeline))
@@ -184,6 +194,55 @@ class PerfectedTwoStageProcessor:
         
         return convert_dates_recursive(pipeline)
     
+    def _apply_fuzzy_matching(self, pipeline: List[Dict]) -> List[Dict]:
+        """Convert exact matches to fuzzy regex matches for better search results"""
+        def make_fuzzy_match(match_stage):
+            """Convert exact matches to regex patterns"""
+            new_match = {}
+            
+            for field, condition in match_stage.get('$match', {}).items():
+                if isinstance(condition, str):
+                    # Convert exact string match to case-insensitive regex
+                    # Handle spaces by making them optional and flexible
+                    fuzzy_pattern = condition.replace(' ', r'\s*').strip()
+                    new_match[field] = {'$regex': f'.*{fuzzy_pattern}.*', '$options': 'i'}
+                elif isinstance(condition, dict):
+                    # Handle nested conditions
+                    new_condition = {}
+                    for op, value in condition.items():
+                        if op in ['$eq', '$in'] and isinstance(value, str):
+                            fuzzy_pattern = value.replace(' ', r'\s*').strip()
+                            new_condition = {'$regex': f'.*{fuzzy_pattern}.*', '$options': 'i'}
+                        elif op == '$in' and isinstance(value, list):
+                            # Convert array of exact matches to regex patterns
+                            regex_patterns = []
+                            for item in value:
+                                if isinstance(item, str):
+                                    fuzzy_pattern = item.replace(' ', r'\s*').strip()
+                                    regex_patterns.append({'$regex': f'.*{fuzzy_pattern}.*', '$options': 'i'})
+                            if regex_patterns:
+                                new_condition = {'$or': [{field: pattern} for pattern in regex_patterns]}
+                            else:
+                                new_condition = condition
+                        else:
+                            new_condition[op] = value
+                    new_match[field] = new_condition
+                else:
+                    new_match[field] = condition
+            
+            return {'$match': new_match}
+        
+        # Apply fuzzy matching to $match stages
+        fuzzy_pipeline = []
+        for stage in pipeline:
+            if '$match' in stage:
+                fuzzy_stage = make_fuzzy_match(stage)
+                fuzzy_pipeline.append(fuzzy_stage)
+            else:
+                fuzzy_pipeline.append(stage)
+        
+        return fuzzy_pipeline
+    
     def _clean_mongodb_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Clean MongoDB result by converting ObjectIds to strings"""
         cleaned = {}
@@ -199,3 +258,24 @@ class PerfectedTwoStageProcessor:
                 cleaned[key] = value
         
         return cleaned
+    
+    def _fix_collection_name(self, collection_name: str) -> str:
+        """Fix common collection name spelling variants"""
+        if not collection_name:
+            return collection_name
+        
+        # Common collection name corrections
+        collection_fixes = {
+            'costevaluationforllm': 'costevalutionforllm',  # Missing 'a' in evaluation
+            'costeevaluationforllm': 'costevalutionforllm',  # Extra 'e' variant
+            'cost_evaluation_for_llm': 'costevalutionforllm',  # Underscore variant
+            'costsforllm': 'costevalutionforllm',  # Shortened variant
+        }
+        
+        # Apply correction if found
+        corrected_name = collection_fixes.get(collection_name.lower(), collection_name)
+        
+        if corrected_name != collection_name:
+            logger.info(f"🔧 Corrected collection name: '{collection_name}' → '{corrected_name}'")
+        
+        return corrected_name

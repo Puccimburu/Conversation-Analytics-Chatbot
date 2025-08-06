@@ -4,7 +4,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Edit3, Save, X, Copy, RefreshCw, ChevronDown, ChevronUp,
-  BarChart3, PieChart, TrendingUp, Table as TableIcon,
+  BarChart3, PieChart, TrendingUp, Table as TableIcon, Circle,
   Download, ExternalLink, Zap, Activity, Target, MessageCircle, ArrowRight
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -356,6 +356,7 @@ const ResponseInterface = ({
 
     // Handle both direct data and nested data structures
     let chartDataObj = {};
+    console.log('🔍 ChartDisplay received chartData:', chartData);
     if (chartData.data) {
       chartDataObj = chartData.data;
     } else if (chartData.labels || chartData.datasets) {
@@ -432,9 +433,106 @@ const ResponseInterface = ({
       return renderDataTable(tableData, columns);
     };
 
+    const renderDoughnutChart = () => {
+      if (labels.length === 0 || data.length === 0) {
+        return <div className="text-center text-gray-500 py-8">No data available for doughnut chart</div>;
+      }
+
+      const total = data.reduce((sum, value) => sum + (typeof value === 'number' ? value : 0), 0);
+      const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#F97316', '#06B6D4', '#84CC16'];
+      
+      let cumulativeAngle = 0;
+      const segments = data.map((value, index) => {
+        const numericValue = typeof value === 'number' ? value : 0;
+        const percentage = total > 0 ? (numericValue / total) * 100 : 0;
+        const angle = total > 0 ? (numericValue / total) * 360 : 0;
+        
+        const segment = {
+          value: numericValue,
+          percentage: percentage,
+          startAngle: cumulativeAngle,
+          endAngle: cumulativeAngle + angle,
+          color: colors[index % colors.length],
+          label: labels[index]
+        };
+        
+        cumulativeAngle += angle;
+        return segment;
+      });
+
+      return (
+        <div className="flex flex-col lg:flex-row items-center justify-center space-y-6 lg:space-y-0 lg:space-x-8">
+          {/* Doughnut Chart */}
+          <div className="relative">
+            <svg width="280" height="280" className="transform -rotate-90">
+              <circle
+                cx="140"
+                cy="140"
+                r="120"
+                fill="none"
+                stroke="#F3F4F6"
+                strokeWidth="40"
+              />
+              {segments.map((segment, index) => {
+                if (segment.percentage === 0) return null;
+                
+                const radius = 120;
+                const circumference = 2 * Math.PI * radius;
+                const strokeDasharray = `${(segment.percentage / 100) * circumference} ${circumference}`;
+                const strokeDashoffset = -((segment.startAngle / 360) * circumference);
+                
+                return (
+                  <circle
+                    key={index}
+                    cx="140"
+                    cy="140"
+                    r={radius}
+                    fill="none"
+                    stroke={segment.color}
+                    strokeWidth="40"
+                    strokeDasharray={strokeDasharray}
+                    strokeDashoffset={strokeDashoffset}
+                    className="transition-all duration-300"
+                  />
+                );
+              })}
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-gray-800">{total.toLocaleString()}</div>
+                <div className="text-sm text-gray-500">Total</div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Legend */}
+          <div className="space-y-3">
+            {segments.map((segment, index) => (
+              <div key={index} className="flex items-center space-x-3">
+                <div 
+                  className="w-4 h-4 rounded-full"
+                  style={{ backgroundColor: segment.color }}
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-gray-700">
+                    {segment.label}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {segment.value.toLocaleString()} ({segment.percentage.toFixed(1)}%)
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
     const renderChart = () => {
       switch (chartType) {
         case 'bar': return renderBarChart();
+        case 'pie': return renderDoughnutChart(); // Reuse doughnut for pie
+        case 'doughnut': return renderDoughnutChart();
         case 'table': return renderTable();
         default: return renderBarChart();
       }
@@ -444,6 +542,7 @@ const ResponseInterface = ({
       const iconMap = {
         bar: <BarChart3 className="w-4 h-4" />,
         pie: <PieChart className="w-4 h-4" />,
+        doughnut: <Circle className="w-4 h-4" />,
         line: <TrendingUp className="w-4 h-4" />,
         table: <TableIcon className="w-4 h-4" />
       };
@@ -477,6 +576,129 @@ const ResponseInterface = ({
           <span>Chart Type: {chartType.charAt(0).toUpperCase() + chartType.slice(1)}</span>
           <span>Generated: {new Date().toLocaleTimeString()}</span>
         </div>
+      </div>
+    );
+  };
+
+  // Multi-Output Display Component
+  const MultiOutputDisplay = ({ outputs, primaryInsights, recommendations }) => {
+    if (!outputs || !Array.isArray(outputs) || outputs.length === 0) {
+      return null;
+    }
+
+    const textOutputs = outputs.filter(output => output.type === 'text');
+    const tableOutputs = outputs.filter(output => output.type === 'table');
+    const chartOutputs = outputs.filter(output => output.type === 'chart');
+
+    return (
+      <div className="space-y-6">
+        {/* Text Outputs */}
+        {textOutputs.map((textOutput, index) => (
+          <div key={`text-${index}`} className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100">
+            <div className="flex items-center space-x-2 mb-4">
+              <MessageCircle className="w-5 h-5 text-blue-600" />
+              <h3 className="text-lg font-semibold text-gray-800">Analysis</h3>
+            </div>
+            <div className="prose max-w-none">
+              <ReactMarkdown className="text-gray-700 leading-relaxed">
+                {textOutput.content}
+              </ReactMarkdown>
+            </div>
+          </div>
+        ))}
+
+        {/* Charts and Tables Grid */}
+        <div className={`grid gap-6 ${chartOutputs.length > 0 && tableOutputs.length > 0 ? 'lg:grid-cols-2' : 'grid-cols-1'}`}>
+          {/* Chart Outputs */}
+          {chartOutputs.map((chartOutput, index) => (
+            <div key={`chart-${index}`} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="border-b border-gray-100 px-6 py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    {(() => {
+                      const iconMap = {
+                        bar: <BarChart3 className="w-5 h-5 text-blue-600" />,
+                        pie: <PieChart className="w-5 h-5 text-green-600" />,
+                        doughnut: <Circle className="w-5 h-5 text-purple-600" />,
+                        line: <TrendingUp className="w-5 h-5 text-orange-600" />
+                      };
+                      return iconMap[chartOutput.chart_type] || <BarChart3 className="w-5 h-5 text-blue-600" />;
+                    })()}
+                    <h3 className="text-lg font-semibold text-gray-800 capitalize">
+                      {chartOutput.chart_type} Chart
+                    </h3>
+                  </div>
+                </div>
+              </div>
+              <div className="p-6">
+                <ChartDisplay 
+                  chartData={{
+                    type: chartOutput.chart_type,
+                    data: chartOutput.data,
+                    options: chartOutput.options
+                  }} 
+                />
+              </div>
+            </div>
+          ))}
+
+          {/* Table Outputs */}
+          {tableOutputs.map((tableOutput, index) => (
+            <div key={`table-${index}`} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="border-b border-gray-100 px-6 py-4">
+                <div className="flex items-center space-x-2">
+                  <TableIcon className="w-5 h-5 text-gray-600" />
+                  <h3 className="text-lg font-semibold text-gray-800">Data Table</h3>
+                </div>
+              </div>
+              <div className="p-6">
+                {tableOutput.data && tableOutput.data.tableData && renderDataTable(
+                  tableOutput.data.tableData,
+                  tableOutput.data.columns || Object.keys(tableOutput.data.tableData[0] || {})
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Insights and Recommendations */}
+        {(primaryInsights?.length > 0 || recommendations?.length > 0) && (
+          <div className="grid md:grid-cols-2 gap-6">
+            {primaryInsights && primaryInsights.length > 0 && (
+              <div className="bg-green-50 rounded-xl p-6 border border-green-100">
+                <div className="flex items-center space-x-2 mb-4">
+                  <Target className="w-5 h-5 text-green-600" />
+                  <h3 className="text-lg font-semibold text-gray-800">Key Insights</h3>
+                </div>
+                <ul className="space-y-2">
+                  {primaryInsights.map((insight, index) => (
+                    <li key={index} className="flex items-start space-x-2">
+                      <ArrowRight className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                      <span className="text-gray-700">{insight}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {recommendations && recommendations.length > 0 && (
+              <div className="bg-orange-50 rounded-xl p-6 border border-orange-100">
+                <div className="flex items-center space-x-2 mb-4">
+                  <Zap className="w-5 h-5 text-orange-600" />
+                  <h3 className="text-lg font-semibold text-gray-800">Recommendations</h3>
+                </div>
+                <ul className="space-y-2">
+                  {recommendations.map((recommendation, index) => (
+                    <li key={index} className="flex items-start space-x-2">
+                      <ArrowRight className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                      <span className="text-gray-700">{recommendation}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -581,16 +803,56 @@ const ResponseInterface = ({
         {activeTab === 'Answer' && (
           <div>
             {/* Main Response Content */}
-            <div className="prose prose-gray max-w-none mb-6">
-              <ReactMarkdown>
-                {response?.content || response?.answer || 'No response content available.'}
-              </ReactMarkdown>
-            </div>
+            {/* Multi-Output Display (New System) */}
+            {(() => {
+              // Debug logging
+              console.log('🔍 RESPONSE STRUCTURE DEBUG:');
+              console.log('   Has outputs:', response?.outputs && Array.isArray(response.outputs));
+              console.log('   Outputs length:', response?.outputs?.length || 0);
+              console.log('   Has chart_data:', !!response?.chart_data);
+              console.log('   Chart_data type:', typeof response?.chart_data);
+              console.log('   Chart_data keys:', response?.chart_data ? Object.keys(response.chart_data) : 'none');
+              
+              // Use new multi-output system if available
+              if (response?.outputs && Array.isArray(response.outputs) && response.outputs.length > 0) {
+                console.log('🎯 Using NEW multi-output system');
+                return (
+                  <MultiOutputDisplay 
+                    outputs={response.outputs}
+                    primaryInsights={response.primary_insights || response.insights}
+                    recommendations={response.recommendations}
+                  />
+                );
+              } else {
+                console.log('🎯 Using LEGACY single-output system');
+                return (
+                  /* Legacy Single Output Display (Backward Compatibility) */
+                  <>
+                    <div className="prose prose-gray max-w-none mb-6">
+                      <ReactMarkdown>
+                        {response?.content || response?.answer || response?.summary || 'No response content available.'}
+                      </ReactMarkdown>
+                    </div>
 
-            {/* Chart/Visualization */}
-            {response?.chart_data && (
-              <ChartDisplay chartData={response.chart_data} />
-            )}
+                    {/* Chart/Visualization */}
+                    {response?.chart_data && Object.keys(response.chart_data).length > 0 && (
+                      <ChartDisplay chartData={response.chart_data} />
+                    )}
+                    
+                    {/* Debug: Show what we have if chart_data is empty */}
+                    {response?.chart_data && Object.keys(response.chart_data).length === 0 && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                        <p className="text-yellow-800">⚠️ Chart data is empty object. Backend might not be sending proper chart data.</p>
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-sm">Debug Info</summary>
+                          <pre className="text-xs mt-2 bg-gray-100 p-2 rounded">{JSON.stringify(response, null, 2)}</pre>
+                        </details>
+                      </div>
+                    )}
+                  </>
+                );
+              }
+            })()}
 
 
             {/* NEW: Follow-Up Questions Component */}
