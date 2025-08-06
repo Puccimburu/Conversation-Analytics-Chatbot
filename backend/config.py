@@ -11,8 +11,8 @@ class Config:
     GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
     
     # Database Configuration
-    MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://127.0.0.1:27017/genai')
-    DATABASE_NAME = os.getenv('DATABASE_NAME', 'genai')
+    MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://127.0.0.1:27017/genaiexeco-development')
+    DATABASE_NAME = os.getenv('DATABASE_NAME', 'genaiexeco-development')
     
     # Flask Configuration
     DEBUG = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'

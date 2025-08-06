@@ -16,8 +16,8 @@ print("\n1️⃣ TESTING MONGODB DIRECTLY")
 print("-" * 40)
 
 try:
-    client = pymongo.MongoClient('mongodb://127.0.0.1:27017/analytics_db')
-    db = client.analytics_db
+    client = pymongo.MongoClient('mongodb://127.0.0.1:27017/genaiexeco-development')
+    db = client['genaiexeco-development']
     
     # Test basic connection
     client.admin.command('ping')

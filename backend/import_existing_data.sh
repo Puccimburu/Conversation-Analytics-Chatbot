@@ -20,12 +20,12 @@ echo "📊 Connecting to MongoDB and importing data..."
 # Method 1: Using mongosh (if available)
 if command -v mongosh &> /dev/null; then
     echo "Using mongosh to import data..."
-    mongosh mongodb://localhost:27017/analytics_db data/sample_data.json
+    mongosh mongodb://localhost:27017/genaiexeco-development data/sample_data.json
     
 # Method 2: Using mongo (legacy)
 elif command -v mongo &> /dev/null; then
     echo "Using mongo to import data..."
-    mongo mongodb://localhost:27017/analytics_db data/sample_data.json
+    mongo mongodb://localhost:27017/genaiexeco-development data/sample_data.json
     
 # Method 3: Python script fallback
 else
@@ -47,7 +47,7 @@ try:
     
     # Connect to MongoDB
     client = pymongo.MongoClient('mongodb://localhost:27017/')
-    db = client.analytics_db
+    db = client['genaiexeco-development']
     
     print("✅ Connected to MongoDB")
     
