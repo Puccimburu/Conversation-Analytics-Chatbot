@@ -122,16 +122,16 @@ DATABASE_SCHEMA = {
         },
         
         "batches": {
-            "description": "Document processing batch information",
+            "available_statuss": ["Processed", "Processing", "queued"],
+            "date_fields": ["createdAt", "updatedAt"],
+            "description": "Auto-generated schema for the 'batches' collection.",
             "fields": [
-                "_id", "batchId", "batchType", "status", "createdAt", "startedAt",
-                "completedAt", "totalItems", "processedItems", "failedItems",
-                "userId", "processingTime", "metadata"
+                "__v", "_id", "batchId", "batchName", "createdAt", "createdBy",
+                "description", "files", "status", "updatedAt", "updatedBy"
             ],
-            "date_fields": ["createdAt", "startedAt", "completedAt"],
-            "numeric_fields": ["totalItems", "processedItems", "failedItems", "processingTime"],
-            "group_by_fields": ["batchType", "status", "userId"],
-            "key_metrics": ["totalItems", "processedItems", "failedItems", "processingTime"]
+            "group_by_fields": ["batchId", "batchName", "createdBy", "description", "status", "updatedBy"],
+            "key_metrics": ["__v"],
+            "numeric_fields": ["__v"]
         },
         
         "files": {
@@ -224,15 +224,18 @@ DATABASE_SCHEMA = {
         
         # User Management
         "users": {
-            "description": "User accounts and profiles",
-            "fields": [
-                "_id", "userId", "emailId", "firstName", "lastName", "role", 
-                "createdAt", "updatedAt", "googleId", "authSource", "profilePicture"
-            ],
             "date_fields": ["createdAt", "updatedAt"],
-            "numeric_fields": [],
-            "group_by_fields": ["role", "authSource"],
-            "key_metrics": []
+            "description": "Auto-generated schema for the 'users' collection.",
+            "fields": [
+                "__v", "_id", "authSource", "createdAt", "emailId", "firstName",
+                "googleId", "lastName", "password", "profilePicture", "role", "updatedAt", "userId"
+            ],
+            "group_by_fields": [
+                "authSource", "emailId", "firstName", "googleId", "lastName",
+                "password", "profilePicture", "role", "userId"
+            ],
+            "key_metrics": ["__v"],
+            "numeric_fields": ["__v"]
         },
         
         "allowedusers": {

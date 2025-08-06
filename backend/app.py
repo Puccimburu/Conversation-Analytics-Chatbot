@@ -7,6 +7,8 @@ import logging
 from datetime import datetime, timezone
 import pymongo
 import time
+from bson import ObjectId
+import json
 
 # Import all modular components
 from utils.analytics_processor import TwoStageAnalyticsProcessor
@@ -26,6 +28,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def convert_objectid_to_str(obj):
+    """Convert ObjectId objects to strings for JSON serialization"""
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_objectid_to_str(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_objectid_to_str(item) for item in obj]
+    return obj
 
 app = Flask(__name__)
 CORS(app)
@@ -89,7 +101,7 @@ if mongodb_available and gemini_available:
         
         # Initialize memory systems
         memory_manager = MemoryRAGManager(db, gemini_client)
-        memory_enhanced_processor = MemoryEnhancedProcessor(two_stage_processor, memory_manager)
+        memory_enhanced_processor = MemoryEnhancedProcessor(two_stage_processor, memory_manager, gemini_client)
         logger.info("✅ Memory-Enhanced Processor initialized")
         
     except Exception as e:
@@ -214,6 +226,8 @@ async def process_query_async():
             save_message_to_chat(db, chat_id, ai_message)
         
         logger.info(f"✅ Query processed successfully in {execution_time:.3f}s")
+        # Convert ObjectId fields to strings before JSON serialization
+        result = convert_objectid_to_str(result)
         return jsonify(result)
         
     except Exception as e:

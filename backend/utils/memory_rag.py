@@ -1,7 +1,6 @@
-# backend/utils/memory_rag.py - FIXED VERSION WITH COMPLETE LOGGING
+# backend/utils/memory_rag.py
 """
-Memory RAG System with Complete Chat History Logging
-Fixed to properly log ALL memory storage operations
+Memory RAG System with Chat History Logging
 """
 
 import logging
@@ -70,8 +69,8 @@ Return only the questions, one per line, no numbering.
             
             # Generate suggestions using Gemini
             response = self.gemini_client.model.generate_content(prompt)
-            if response and response.strip():
-                suggestions = [s.strip() for s in response.strip().split('\n') if s.strip()]
+            if response and response.text and response.text.strip():
+                suggestions = [s.strip() for s in response.text.strip().split('\n') if s.strip()]
                 suggestions = suggestions[:3]  # Take first 3
                 logger.info(f"🎯 Generated {len(suggestions)} smart suggestions: {suggestions}")
                 return suggestions
@@ -185,9 +184,7 @@ class MemoryRAGManager:
             # INSERT INTO DATABASE
             self.memory_collection.insert_one(memory)
             
-            # 🔥 FIXED: LOG ALL MEMORY STORAGE OPERATIONS 🔥
             content_preview = content[:100] + "..." if len(content) > 100 else content
-            logger.info(f"📝 Stored {content_type} memory: {fragment_id} for chat {chat_id}")
             logger.info(f"🧠 Stored {content_type.upper()} in memory: {fragment_id} - Content: {content_preview}")
             
             # Cleanup old memories
@@ -387,7 +384,6 @@ class MemoryEnhancedProcessor:
         try:
             # 🔥 CRITICAL FIX: Store user question with logging
             question_fragment_id = await self.memory_manager.store_memory(chat_id, question, 'question')
-            logger.info(f"💬 USER QUESTION stored: {question_fragment_id} - '{question[:50]}...'")
             
             # Get conversation context (for AI processing only)
             enhanced_question = await self.memory_manager.get_conversation_context(chat_id, question)
@@ -422,7 +418,6 @@ class MemoryEnhancedProcessor:
                         }
                 
                 answer_fragment_id = await self.memory_manager.store_memory(chat_id, response_content, 'answer', query_context)
-                logger.info(f"🤖 AI ANSWER stored: {answer_fragment_id} - Summary: {response_content[:50]}...")
                 
                 # Store insights as separate facts
                 if result.get('insights'):
@@ -432,14 +427,12 @@ class MemoryEnhancedProcessor:
                             f"Insight: {insight}", 
                             'fact'
                         )
-                        logger.info(f"💡 INSIGHT stored: {insight_fragment_id} - {insight[:50]}...")
             
             # Generate smart suggestions (use original question, not enhanced)
             if self.suggestion_generator:
                 try:
                     suggestions = await self.suggestion_generator.generate_smart_suggestions(question, result)
                     result['suggestions'] = suggestions
-                    logger.info(f"🎯 Added {len(suggestions)} suggestions to result: {suggestions}")
                 except Exception as e:
                     logger.warning(f"Suggestion generation failed: {e}")
                     result['suggestions'] = self.suggestion_generator.default_suggestions[:3]
@@ -452,8 +445,6 @@ class MemoryEnhancedProcessor:
                 'answer_fragment_id': result.get('answer_fragment_id')
             }
             
-            # Debug: Log final result structure
-            logger.info(f"🔍 FINAL RESULT: keys={list(result.keys())}, suggestions_count={len(result.get('suggestions', []))}")
             
             return result
             
