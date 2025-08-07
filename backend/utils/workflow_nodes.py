@@ -11,6 +11,7 @@ import traceback
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +346,7 @@ class EnhancedAnalyticsWorkflowNodes:
             if not query_config:
                 raise Exception("No MongoDB query configuration available")
             
-            if not self.db:
+            if self.db is None:
                 raise Exception("Database connection not available")
             
             collection_name = query_config.get("collection")
@@ -612,7 +613,7 @@ class EnhancedAnalyticsWorkflowNodes:
                     "errors": errors,
                     "intent_detected": intent.get("primary_intent"),
                     "target_collection": intent.get("target_collection"),
-                    "processing_time": (datetime.now() - state.get("start_time", datetime.now())).total_seconds() if state.get("start_time") else 0
+                    "processing_time": (datetime.now(timezone.utc) - state.get("start_time")).total_seconds() if state.get("start_time") else 0
                 }
             }
             

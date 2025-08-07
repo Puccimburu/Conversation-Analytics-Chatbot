@@ -48,7 +48,9 @@ class MongoDBCheckpointer(BaseCheckpointSaver):
         self,
         config: RunnableConfig,
         checkpoint: Checkpoint,
-        
+        *args,
+        **kwargs
+
     ) -> RunnableConfig:
         try:
             if self.collection is None:
@@ -180,12 +182,33 @@ class MongoDBCheckpointer(BaseCheckpointSaver):
         """
         logger.debug(f"Intercepted async call to aget_tuple for thread {config.get('configurable', {}).get('thread_id')}")
         return self.get_tuple(config)
+    
+    async def aput_writes(
+        self, config: RunnableConfig, writes: List[tuple[str, Any]], *args, **kwargs
+    ) -> RunnableConfig:
+        """
+        Asynchronously save a batch of writes to the checkpoint.
+        This is the new, optimized method used by recent LangGraph versions.
+        """
+        # A simple implementation is to find the main checkpoint in the writes
+        # and save it using our existing 'put' logic.
+        for _, checkpoint in writes:
+            if isinstance(checkpoint, dict) and checkpoint.get("channel") == "__root__":
+                # This is the main state checkpoint
+                logger.debug(f"Intercepted async call to aput_writes for thread {config.get('configurable', {}).get('thread_id')}")
+                return self.put(config, checkpoint)
+        
+        # If no main checkpoint is found, we can log a warning or do nothing.
+        logger.warning("aput_writes called without a main checkpoint to save.")
+        return config
 
     async def aput(
         self,
         config: RunnableConfig,
         checkpoint: Checkpoint,
-        
+        *args,
+        **kwargs
+
     ) -> RunnableConfig:
         """Asynchronous version of put."""
         logger.debug(f"Intercepted async call to aput for thread {config.get('configurable', {}).get('thread_id')}")
