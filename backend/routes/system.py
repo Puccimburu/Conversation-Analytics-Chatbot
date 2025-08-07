@@ -1,11 +1,25 @@
 from flask import Blueprint, jsonify
 from datetime import datetime, timezone
 import logging
+import math
+from bson import ObjectId
 
 # Create blueprint
 system_bp = Blueprint('system', __name__)
 
 logger = logging.getLogger(__name__)
+
+def convert_objectid_to_str(obj):
+    """Convert ObjectId objects to strings and handle NaN values for JSON serialization"""
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, float) and math.isnan(obj):
+        return None  # Convert NaN to null for JSON compatibility
+    elif isinstance(obj, dict):
+        return {key: convert_objectid_to_str(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_objectid_to_str(item) for item in obj]
+    return obj
 
 def init_system_routes(db, mongodb_available, gemini_available, two_stage_processor, memory_enhanced_processor, MONGODB_URI):
     """Initialize system routes with dependencies"""
@@ -72,10 +86,12 @@ def init_system_routes(db, mongodb_available, gemini_available, two_stage_proces
                 except Exception as e:
                     collection_stats[collection_name] = {"error": str(e)}
             
-            return jsonify({
+            collection_data = {
                 "total_collections": len(collections),
                 "collections": collection_stats
-            })
+            }
+            cleaned_data = convert_objectid_to_str(collection_data)
+            return jsonify(cleaned_data)
             
         except Exception as e:
             return jsonify({"error": f"Failed to get collection info: {str(e)}"}), 500

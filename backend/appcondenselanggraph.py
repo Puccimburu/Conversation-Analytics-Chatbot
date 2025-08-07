@@ -44,9 +44,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def convert_objectid_to_str(obj):
-    """Convert ObjectId objects to strings for JSON serialization"""
+    """Convert ObjectId objects to strings and handle NaN values for JSON serialization"""
+    import math
     if isinstance(obj, ObjectId):
         return str(obj)
+    elif isinstance(obj, float) and math.isnan(obj):
+        return None  # Convert NaN to null for JSON compatibility
     elif isinstance(obj, dict):
         return {key: convert_objectid_to_str(value) for key, value in obj.items()}
     elif isinstance(obj, list):
@@ -292,7 +295,9 @@ async def process_langgraph_query_async():
         
         logger.info(f"🧠✅ LangGraph query processed in {result['processing_time']:.2f}s")
         
-        return jsonify(result)
+        # Clean ObjectIds and NaN values before JSON serialization
+        cleaned_result = convert_objectid_to_str(result)
+        return jsonify(cleaned_result)
         
     except Exception as e:
         logger.error(f"❌ LangGraph query processing failed: {e}")
@@ -311,7 +316,8 @@ def get_workflow_status(thread_id):
             return jsonify({"error": "LangGraph not available"}), 503
         
         status = langgraph_processor.get_workflow_status(thread_id)
-        return jsonify(status)
+        cleaned_status = convert_objectid_to_str(status)
+        return jsonify(cleaned_status)
         
     except Exception as e:
         logger.error(f"Failed to get workflow status: {e}")
@@ -331,7 +337,8 @@ async def resume_workflow_async(thread_id):
         user_input = data.get('user_input')
         
         result = await langgraph_processor.resume_workflow(thread_id, user_input)
-        return jsonify(result)
+        cleaned_result = convert_objectid_to_str(result)
+        return jsonify(cleaned_result)
         
     except Exception as e:
         logger.error(f"Failed to resume workflow: {e}")
@@ -347,10 +354,12 @@ def get_workflow_history(user_id):
         limit = request.args.get('limit', 20, type=int)
         history = langgraph_processor.get_user_workflows(user_id)
         
-        return jsonify({
+        history_data = {
             "user_id": user_id,
             "workflow_history": history[:limit]
-        })
+        }
+        cleaned_history = convert_objectid_to_str(history_data)
+        return jsonify(cleaned_history)
         
     except Exception as e:
         logger.error(f"Failed to get workflow history: {e}")
@@ -366,10 +375,12 @@ def get_active_workflows():
         user_id = request.args.get('user_id')
         active_workflows = langgraph_workflow.get_active_workflows(user_id)
         
-        return jsonify({
+        active_data = {
             "active_workflows": active_workflows,
             "count": len(active_workflows)
-        })
+        }
+        cleaned_active = convert_objectid_to_str(active_data)
+        return jsonify(cleaned_active)
         
     except Exception as e:
         logger.error(f"Failed to get active workflows: {e}")
@@ -385,10 +396,12 @@ def get_available_workflows():
         selector = WorkflowSelector()
         workflows = selector.get_available_workflows()
         
-        return jsonify({
+        workflows_data = {
             "available_workflows": workflows,
             "count": len(workflows)
-        })
+        }
+        cleaned_workflows = convert_objectid_to_str(workflows_data)
+        return jsonify(cleaned_workflows)
         
     except Exception as e:
         logger.error(f"Failed to get available workflows: {e}")
@@ -415,7 +428,8 @@ def langgraph_system_status():
         status['gemini_available'] = gemini_available
         status['timestamp'] = datetime.now(timezone.utc).isoformat()
         
-        return jsonify(status)
+        cleaned_status = convert_objectid_to_str(status)
+        return jsonify(cleaned_status)
         
     except Exception as e:
         logger.error(f"Status check failed: {e}")
@@ -487,7 +501,8 @@ def health_check():
             }
         }
         
-        return jsonify(status)
+        cleaned_status = convert_objectid_to_str(status)
+        return jsonify(cleaned_status)
         
     except Exception as e:
         return jsonify({

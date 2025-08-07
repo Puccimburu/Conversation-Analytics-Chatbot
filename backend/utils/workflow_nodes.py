@@ -150,13 +150,26 @@ class EnhancedAnalyticsWorkflowNodes:
 
                 # FIX 2: The data is already a dictionary. No need for json.loads.
                 # **CRITICAL STEP**: Adapt the query output to the intent structure.
+                # Detect proper analysis type based on the original question
+                question_lower = original_question.lower()
+                analysis_type = "list"  # Default for user queries
+                
+                if any(word in question_lower for word in ['count', 'how many', 'total', 'sum']):
+                    analysis_type = "count"
+                elif any(word in question_lower for word in ['trend', 'over time', 'monthly', 'daily']):
+                    analysis_type = "trend"
+                elif any(word in question_lower for word in ['compare', 'analysis', 'group', 'by']):
+                    analysis_type = "aggregate"
+                elif any(word in question_lower for word in ['list', 'show', 'get', 'find', 'display']):
+                    analysis_type = "list"
+                
                 adapted_intent = {
                     "primary_intent": intent_query_data.get("intent", "general_query"),
                     "target_collection": intent_query_data.get("collection"),
-                    "analysis_type": "custom_query",  # Special flag for the next node
+                    "analysis_type": analysis_type,  # Properly detected analysis type
                     "custom_pipeline": intent_query_data.get("pipeline"),  # The generated query
                     "confidence": 0.95,
-                    "reasoning": "Intent adapted from an AI-generated MongoDB query."
+                    "reasoning": f"Intent adapted from AI query with {analysis_type} analysis type."
                 }
 
                 # Store the ADAPTED intent and mark step as completed
@@ -269,7 +282,7 @@ class EnhancedAnalyticsWorkflowNodes:
                     "collection": collection,
                     "operation": "find",
                     "query": {},
-                    "limit": 10,
+                    "limit": 50,  # Increased limit to show more users
                     "sort": {"_id": -1},
                     "projection": {}  # Get all fields
                 }
@@ -307,7 +320,7 @@ class EnhancedAnalyticsWorkflowNodes:
                     "collection": collection,
                     "operation": "find",
                     "query": {},
-                    "limit": 5
+                    "limit": 50  # Increased fallback limit to match list limit
                 }
             
             state["mongo_query"] = mongo_query
@@ -493,16 +506,24 @@ class EnhancedAnalyticsWorkflowNodes:
             elif analysis_type == "list":
                 chart_config = {
                     "chart_type": "table",
+                    "type": "table",  # Frontend compatibility
+                    "chartType": "table",  # Additional frontend compatibility
                     "title": f"Data from {intent.get('target_collection', 'database')}",
                     "columns": self._extract_table_columns(raw_data),
+                    "tableData": raw_data[:50],  # Include the actual table data (limit for performance)
                     "show_table": True,
                     "pagination": data_count > 10
                 }
                 
             elif analysis_type in ["aggregate", "trend", "comparison"]:
+                # Generate proper chart data for bar charts
+                chart_data = self._generate_chart_data_from_raw_data(raw_data, analysis_type)
                 chart_config = {
                     "chart_type": "bar",
+                    "type": "bar",  # Frontend compatibility
+                    "chartType": "bar",  # Additional frontend compatibility
                     "title": f"Analysis Results",
+                    "data": chart_data,  # Add proper Chart.js data structure
                     "show_table": True,
                     "interactive": True
                 }
@@ -511,8 +532,11 @@ class EnhancedAnalyticsWorkflowNodes:
                 # Default table view
                 chart_config = {
                     "chart_type": "table",
+                    "type": "table",  # Frontend compatibility
+                    "chartType": "table",  # Additional frontend compatibility
                     "title": "Query Results",
                     "columns": self._extract_table_columns(raw_data),
+                    "tableData": raw_data[:50],  # Include the actual table data (limit for performance)
                     "show_table": True
                 }
             
@@ -529,7 +553,11 @@ class EnhancedAnalyticsWorkflowNodes:
             # Fallback visualization
             state["chart_config"] = {
                 "chart_type": "table",
+                "type": "table",  # Frontend compatibility
+                "chartType": "table",  # Additional frontend compatibility
                 "title": "Results",
+                "tableData": raw_data[:50] if raw_data else [],  # Include actual data even in fallback
+                "columns": self._extract_table_columns(raw_data) if raw_data else [],
                 "show_table": True,
                 "error": str(e)
             }
@@ -696,6 +724,136 @@ class EnhancedAnalyticsWorkflowNodes:
                 recommendations.append("Consider adding filters to narrow down results")
         
         return recommendations
+    
+    def _generate_chart_data_from_raw_data(self, raw_data: List[Dict], analysis_type: str) -> Dict:
+        """Generate Chart.js compatible data structure from raw MongoDB data"""
+        if not raw_data:
+            return {"labels": [], "datasets": []}
+        
+        try:
+            # For aggregation results, look for common aggregation patterns
+            if analysis_type == "aggregate":
+                # Check if data has aggregation fields like _id, count, total, etc.
+                sample = raw_data[0]
+                
+                if "count" in sample or "total" in sample:
+                    # Aggregation result with count/total
+                    labels = []
+                    values = []
+                    
+                    for item in raw_data[:20]:  # Limit for readability
+                        if "_id" in item:
+                            labels.append(str(item["_id"]) if item["_id"] is not None else "Unknown")
+                        else:
+                            labels.append(f"Item {len(labels) + 1}")
+                        
+                        # Get the numeric value
+                        value = item.get("count", item.get("total", item.get("sum", 1)))
+                        values.append(value if isinstance(value, (int, float)) else 1)
+                    
+                    return {
+                        "labels": labels,
+                        "datasets": [{
+                            "label": "Count",
+                            "data": values,
+                            "backgroundColor": self._get_chart_colors(len(values)),
+                            "borderColor": "#3B82F6",
+                            "borderWidth": 1
+                        }]
+                    }
+            
+            # For trend analysis, try to find date/time patterns
+            elif analysis_type == "trend":
+                labels = []
+                values = []
+                
+                for item in raw_data[:20]:
+                    # Look for date fields
+                    date_field = None
+                    for key in ["createdAt", "date", "timestamp", "_id"]:
+                        if key in item:
+                            date_field = key
+                            break
+                    
+                    if date_field:
+                        labels.append(str(item[date_field])[:10])  # Truncate dates
+                    else:
+                        labels.append(f"Record {len(labels) + 1}")
+                    
+                    # Count or use index as value
+                    values.append(1)  # Simple count
+                
+                return {
+                    "labels": labels,
+                    "datasets": [{
+                        "label": "Trend",
+                        "data": values,
+                        "backgroundColor": "#10B981",
+                        "borderColor": "#059669",
+                        "borderWidth": 2,
+                        "fill": False,
+                        "tension": 0.1
+                    }]
+                }
+            
+            # For comparison, group by first non-id field
+            elif analysis_type == "comparison":
+                # Simple comparison based on first string field
+                field_counts = {}
+                comparison_field = None
+                
+                # Find a good field for comparison
+                sample = raw_data[0]
+                for key, value in sample.items():
+                    if key != "_id" and isinstance(value, (str, int, float)) and len(str(value)) < 50:
+                        comparison_field = key
+                        break
+                
+                if comparison_field:
+                    for item in raw_data:
+                        field_value = str(item.get(comparison_field, "Unknown"))
+                        field_counts[field_value] = field_counts.get(field_value, 0) + 1
+                    
+                    # Get top 10 for readability
+                    sorted_items = sorted(field_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                    
+                    return {
+                        "labels": [item[0] for item in sorted_items],
+                        "datasets": [{
+                            "label": f"{comparison_field.replace('_', ' ').title()} Count",
+                            "data": [item[1] for item in sorted_items],
+                            "backgroundColor": self._get_chart_colors(len(sorted_items)),
+                            "borderColor": "#3B82F6",
+                            "borderWidth": 1
+                        }]
+                    }
+            
+            # Default fallback: simple count chart
+            labels = [f"Record {i+1}" for i in range(min(10, len(raw_data)))]
+            values = [1] * len(labels)  # Simple count
+            
+            return {
+                "labels": labels,
+                "datasets": [{
+                    "label": "Data Count",
+                    "data": values,
+                    "backgroundColor": self._get_chart_colors(len(values)),
+                    "borderColor": "#3B82F6",
+                    "borderWidth": 1
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating chart data: {e}")
+            return {"labels": [], "datasets": []}
+    
+    def _get_chart_colors(self, count: int) -> List[str]:
+        """Generate colors for chart datasets"""
+        colors = [
+            "#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6",
+            "#EC4899", "#6366F1", "#14B8A6", "#F97316", "#84CC16"
+        ]
+        return [colors[i % len(colors)] for i in range(count)]
     
     async def handle_error_recovery(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """

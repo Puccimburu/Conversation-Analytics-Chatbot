@@ -136,12 +136,15 @@ def init_query_routes(db, mongodb_available, gemini_available, memory_enhanced_p
                 save_message_to_chat(db, chat_id, ai_message)
             
             logger.info(f"✅ Query processed successfully in {execution_time:.3f}s")
-            # Convert ObjectId fields to strings before JSON serialization
+            # Convert ObjectId fields to strings and handle NaN values before JSON serialization
             from bson import ObjectId
+            import math
             
             def convert_objectid_to_str(obj):
                 if isinstance(obj, ObjectId):
                     return str(obj)
+                elif isinstance(obj, float) and math.isnan(obj):
+                    return None  # Convert NaN to null for JSON compatibility
                 elif isinstance(obj, dict):
                     return {key: convert_objectid_to_str(value) for key, value in obj.items()}
                 elif isinstance(obj, list):
