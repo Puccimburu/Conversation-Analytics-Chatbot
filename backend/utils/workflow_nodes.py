@@ -8,6 +8,7 @@ import logging
 import asyncio
 import json
 import traceback
+import math
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
@@ -428,6 +429,8 @@ class EnhancedAnalyticsWorkflowNodes:
                 if isinstance(item, dict):
                     cleaned_item = {}
                     for key, value in item.items():
+                        if isinstance(value, float) and math.isnan(value):
+                            cleaned_item[key] = None # Convert NaN to None (which becomes JSON null)
                         # Convert ObjectId to string
                         if hasattr(value, '__class__') and 'ObjectId' in str(value.__class__):
                             cleaned_item[key] = str(value)
