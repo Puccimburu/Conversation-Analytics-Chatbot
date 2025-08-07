@@ -7,7 +7,7 @@ Provides persistent state management using your existing langgraph_checkpoints c
 import logging
 import json
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, AsyncIterator
 from langgraph.checkpoint.base import BaseCheckpointSaver, Checkpoint, CheckpointMetadata
 from langchain_core.runnables import RunnableConfig
 
@@ -48,28 +48,20 @@ class MongoDBCheckpointer(BaseCheckpointSaver):
         self,
         config: RunnableConfig,
         checkpoint: Checkpoint,
-        metadata: CheckpointMetadata
-    ) -> RunnableConfig:
-        """
-        Save checkpoint to MongoDB collection
         
-        Args:
-            config: LangGraph configuration
-            checkpoint: Current workflow state
-            metadata: Checkpoint metadata
-            
-        Returns:
-            Updated configuration
-        """
+    ) -> RunnableConfig:
         try:
             if self.collection is None:
                 logger.warning("MongoDB collection not available for checkpointing")
                 return config
-            
+        
             thread_id = config.get("configurable", {}).get("thread_id")
             if not thread_id:
                 logger.warning("No thread_id provided for checkpointing")
                 return config
+
+            # Create a placeholder metadata object since the code needs it
+            metadata = {}
             
             # Create checkpoint document matching your schema
             checkpoint_doc = {
@@ -77,9 +69,8 @@ class MongoDBCheckpointer(BaseCheckpointSaver):
                 "thread_id": thread_id,
                 "checkpointId": checkpoint.get("id"),
                 "state": self._serialize_state(checkpoint),
-                "metadata": self._serialize_metadata(metadata),
+                "metadata": self._serialize_metadata(metadata), # Now uses the placeholder
                 "last_updated": datetime.now(timezone.utc),
-                "workflowType": config.get("configurable", {}).get("workflow_type", "analytics"),
                 
                 # Additional fields for your analytics workflows
                 "user_id": config.get("configurable", {}).get("user_id"),
@@ -181,6 +172,38 @@ class MongoDBCheckpointer(BaseCheckpointSaver):
         except Exception as e:
             logger.error(f"Failed to list checkpoints: {e}")
             return []
+        
+    async def aget_tuple(self, config: RunnableConfig) -> Optional[tuple]:
+        """Asynchronous version of get_tuple.
+        
+        For a synchronous driver like pymongo, this can simply call the sync version.
+        """
+        logger.debug(f"Intercepted async call to aget_tuple for thread {config.get('configurable', {}).get('thread_id')}")
+        return self.get_tuple(config)
+
+    async def aput(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        
+    ) -> RunnableConfig:
+        """Asynchronous version of put."""
+        logger.debug(f"Intercepted async call to aput for thread {config.get('configurable', {}).get('thread_id')}")
+        return self.put(config, checkpoint)
+
+    async def alist(
+        self, config: RunnableConfig, limit: Optional[int] = None
+    ) -> AsyncIterator[tuple]:
+        """Asynchronous version of list.
+        
+        This must be an async generator.
+        """
+        logger.debug(f"Intercepted async call to alist for thread {config.get('configurable', {}).get('thread_id')}")
+        # Call the synchronous list method and then yield the results
+        # in an async generator context.
+        sync_list = self.list(config, limit=limit)
+        for item in sync_list:
+            yield item    
     
     def _serialize_state(self, checkpoint: Checkpoint) -> Dict[str, Any]:
         """Serialize checkpoint state for MongoDB storage"""

@@ -24,7 +24,8 @@ from utils.enhanced_gemini_client import BulletproofGeminiClient
 from utils.perfected_processor import PerfectedTwoStageProcessor
 
 # LangGraph components (NEW)
-from utils.langgraph_analytics import LangGraphAnalyticsWorkflow
+#from utils.langgraph_analytics import LangGraphAnalyticsWorkflow
+from utils.langgraph_analytics import EnhancedLangGraphAnalyticsWorkflow
 from utils.mongodb_checkpointer import MongoDBCheckpointer
 from workflows.analytics_flow import WorkflowSelector, WorkflowOptimizer
 
@@ -58,7 +59,7 @@ class LangGraphProcessor:
     while maintaining compatibility with existing interfaces
     """
     
-    def __init__(self, langgraph_workflow: LangGraphAnalyticsWorkflow):
+    def __init__(self, langgraph_workflow: EnhancedLangGraphAnalyticsWorkflow):
         self.workflow = langgraph_workflow
         self.workflow_selector = WorkflowSelector()
         self.workflow_optimizer = WorkflowOptimizer(langgraph_workflow.db)
@@ -100,7 +101,7 @@ class LangGraphProcessor:
             logger.info(f"🧠 Processing with LangGraph: '{question}' (Thread: {thread_id})")
             
             # Execute workflow
-            result = await self.workflow.process_analytics_query(
+            result = await self.workflow.execute_workflow(
                 question=question,
                 chat_id=chat_id,
                 user_id=user_id,
@@ -198,7 +199,7 @@ fallback_processor = None
 if mongodb_available and gemini_available:
     try:
         # Initialize LangGraph workflow system
-        langgraph_workflow = LangGraphAnalyticsWorkflow(
+        langgraph_workflow = EnhancedLangGraphAnalyticsWorkflow(
             gemini_client=gemini_client,
             mongodb_client=db,
             schema_info=DATABASE_SCHEMA
@@ -258,7 +259,7 @@ async def process_langgraph_query_async():
         if not data:
             return jsonify({"success": False, "error": "No JSON data provided"}), 400
         
-        user_question = data.get('question', '').strip()
+        user_question = (data.get('question') or data.get('query') or '').strip()
         chat_id = data.get('chat_id', f"langgraph_{int(time.time())}")
         user_id = data.get('user_id', 'default_user')
         thread_id = data.get('thread_id')  # Optional for resuming workflows

@@ -1,12 +1,13 @@
-# backend/utils/workflow_nodes.py
+# backend/utils/workflow_nodes_enhanced.py
 """
-LangGraph Workflow Nodes for Analytics Processing
-Individual processing nodes that can be composed into complex workflows
+Enhanced LangGraph Workflow Nodes with Comprehensive Error Handling
+Fixed version that addresses the execution failures seen in test results
 """
 
 import logging
 import asyncio
 import json
+import traceback
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
@@ -16,8 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AnalyticsState:
     """
-    State definition for analytics workflows
-    Matches the TypedDict structure but as a dataclass for easier handling
+    Enhanced state definition for analytics workflows with better validation
     """
     # Input
     original_question: str
@@ -44,355 +44,414 @@ class AnalyticsState:
         if self.errors is None:
             self.errors = []
 
-class AnalyticsWorkflowNodes:
+class EnhancedAnalyticsWorkflowNodes:
     """
-    Collection of workflow nodes for analytics processing
-    Each node is a standalone function that can be composed into workflows
+    Enhanced workflow nodes with comprehensive error handling and detailed logging
+    Fixes the execution failures identified in the test results
     """
     
     def __init__(self, gemini_client, mongodb_client, schema_info):
         """
-        Initialize workflow nodes with necessary clients
+        Initialize workflow nodes with enhanced error handling
         
         Args:
-            gemini_client: Your existing enhanced Gemini client
+            gemini_client: Enhanced Gemini client
             mongodb_client: MongoDB database client
-            schema_info: Database schema information from config.py
+            schema_info: Database schema information
         """
         self.gemini_client = gemini_client
         self.db = mongodb_client
         self.schema_info = schema_info
+        
+        # Validate dependencies
+        if not gemini_client:
+            logger.warning("⚠️ Gemini client not provided - AI features will be limited")
+        if mongodb_client is None:
+            logger.warning("⚠️ MongoDB client not provided - data queries will fail")
+        
+        logger.info("✅ Enhanced workflow nodes initialized")
     
     async def understand_intent(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Node 1: Analyze user question to understand intent and data requirements
-        
-        This node determines:
-        - What type of analysis is requested (cost, document, compliance, etc.)
-        - What data collections are needed
-        - What time periods or filters might be required
-        - What visualization might be appropriate
+        Enhanced intent understanding with detailed error handling and fallbacks
         
         Args:
             state: Current workflow state
             
         Returns:
-            Updated state with interpreted_intent
+            Updated state with interpreted_intent or detailed error info
         """
         try:
             state["current_step"] = "understanding_intent"
-            logger.info(f"🧠 Understanding intent for: '{state['original_question']}'")
+            original_question = state.get("original_question", "")
+            
+            logger.info(f"🧠 Starting intent analysis for: '{original_question}'")
+            
+            if not original_question:
+                raise Exception("No question provided for intent analysis")
+            
+            # Get available collections with error handling
+            try:
+                available_collections = list(self.schema_info.get('collections', {}).keys())
+                if not available_collections:
+                    # Fallback: try to get from database
+                    available_collections = self.db.list_collection_names() if self.db else ["users", "documents"]
+                
+                logger.debug(f"Available collections: {available_collections}")
+                
+            except Exception as e:
+                logger.warning(f"Could not get collections list: {e}")
+                available_collections = ["users", "documents", "batches"]  # Safe fallback
             
             # Enhanced prompt for intent understanding
             intent_prompt = f"""
-            Analyze this analytics question and determine the user's intent:
+            Analyze this analytics question and determine the user's intent.
             
-            Question: "{state['original_question']}"
+            Question: "{original_question}"
             
-            Available collections: {list(self.schema_info.get('collections', {}).keys())}
+            Available collections: {available_collections}
             
-            Determine:
-            1. Primary intent (cost_analysis, document_processing, compliance_review, user_management, performance_analysis)
-            2. Required collections (which MongoDB collections are needed)
-            3. Time sensitivity (does this need recent data, historical trends, or specific time periods)
-            4. Complexity level (simple_query, multi_step_analysis, comparative_analysis)
-            5. Expected output (single_metric, trend_analysis, comparative_chart, detailed_breakdown)
-            
-            Respond with JSON:
+            Respond with ONLY a JSON object in this exact format:
             {{
-                "primary_intent": "string",
-                "required_collections": ["collection1", "collection2"],
-                "time_sensitivity": "string",
-                "complexity_level": "string",
-                "expected_output": "string",
-                "key_entities": ["entity1", "entity2"],
-                "suggested_chart_type": "bar|line|pie|table"
+                "primary_intent": "user_management",
+                "target_collection": "users",
+                "analysis_type": "list",
+                "time_filter": "all",
+                "visualization_needed": false,
+                "confidence": 0.8,
+                "reasoning": "User is asking for a simple list of users"
             }}
+            
+            Primary intent options: user_management, cost_analysis, document_processing, compliance_review, performance_analysis, general_query
+            Analysis type options: list, aggregate, count, trend, comparison
+            Time filter options: recent, all, specific_period
             """
             
-            # Use your existing Gemini client
-            if hasattr(self.gemini_client, 'generate_content_async'):
-                response = await self.gemini_client.generate_content_async(intent_prompt)
-            else:
-                response = self.gemini_client.generate_content(intent_prompt)
-            
-            # Parse the response
-            response_text = response.text if hasattr(response, 'text') else str(response)
-            
-            # Extract JSON from response
+            # Make Gemini API call with comprehensive error handling
             try:
-                # Try to find JSON in the response
-                import re
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    intent_data = json.loads(json_match.group())
-                else:
-                    # Fallback: create intent based on keywords
-                    intent_data = self._fallback_intent_analysis(state['original_question'])
-            except json.JSONDecodeError:
-                intent_data = self._fallback_intent_analysis(state['original_question'])
-            
-            state["interpreted_intent"] = intent_data
-            state["current_step"] = "intent_understood"
-            
-            logger.info(f"✅ Intent understood: {intent_data.get('primary_intent')}")
-            return state
-            
+                logger.debug("Making Gemini API call for intent analysis")
+                
+                if not self.gemini_client:
+                    raise Exception("Gemini client not available")
+                
+                response = await self.gemini_client.generate_query(original_question, self.schema_info)
+                
+                if not response or not response.get('success'):
+                    raise Exception(f"Gemini API call failed: {response.get('error', 'Unknown error')}")
+
+                # FIX 1: Get data from the 'data' key, not 'content'
+                intent_query_data = response.get('data')
+                logger.debug(f"Raw Gemini response data: {intent_query_data}")
+
+                if not intent_query_data:
+                    raise Exception("Empty 'data' field from Gemini API response")
+
+                # FIX 2: The data is already a dictionary. No need for json.loads.
+                # **CRITICAL STEP**: Adapt the query output to the intent structure.
+                adapted_intent = {
+                    "primary_intent": intent_query_data.get("intent", "general_query"),
+                    "target_collection": intent_query_data.get("collection"),
+                    "analysis_type": "custom_query",  # Special flag for the next node
+                    "custom_pipeline": intent_query_data.get("pipeline"),  # The generated query
+                    "confidence": 0.95,
+                    "reasoning": "Intent adapted from an AI-generated MongoDB query."
+                }
+
+                # Store the ADAPTED intent and mark step as completed
+                state["interpreted_intent"] = adapted_intent
+                state["current_step"] = "intent_completed"
+
+                logger.info(f"✅ Intent understanding completed (adapted from query): {adapted_intent.get('primary_intent')}")
+                return state
+                
+            except Exception as gemini_error:
+                logger.error(f"Gemini API error: {gemini_error}")
+                
+                # Create intelligent fallback
+                intent_data = self._create_fallback_intent(original_question, available_collections)
+                state["interpreted_intent"] = intent_data
+                state["errors"].append(f"Gemini API error (using fallback): {str(gemini_error)}")
+                state["current_step"] = "intent_completed_fallback"
+                
+                logger.warning(f"Using fallback intent due to Gemini error: {intent_data}")
+                return state
+                
         except Exception as e:
-            logger.error(f"❌ Intent understanding failed: {e}")
+            logger.error(f"❌ Intent understanding completely failed: {e}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            
             state["errors"].append(f"Intent understanding failed: {str(e)}")
             state["current_step"] = "intent_failed"
+            state["success"] = False
+            
             return state
     
-    def _fallback_intent_analysis(self, question: str) -> Dict[str, Any]:
-        """Fallback intent analysis using keyword matching"""
+    def _create_fallback_intent(self, question: str, available_collections: List[str]) -> Dict[str, Any]:
+        """Create intelligent fallback intent based on question keywords"""
         question_lower = question.lower()
         
-        # Determine primary intent
-        if any(word in question_lower for word in ['cost', 'spending', 'expense', 'price']):
-            primary_intent = "cost_analysis"
-            required_collections = ["costevalutionforllm", "llmpricing"]
-        elif any(word in question_lower for word in ['document', 'extraction', 'processing']):
-            primary_intent = "document_processing"
-            required_collections = ["documentextractions", "files", "batches"]
-        elif any(word in question_lower for word in ['compliance', 'obligation', 'requirement']):
-            primary_intent = "compliance_review"
-            required_collections = ["obligationextractions", "obligationmappings", "compliances"]
-        elif any(word in question_lower for word in ['user', 'role', 'access']):
-            primary_intent = "user_management"
-            required_collections = ["users", "allowedusers"]
+        # Determine collection
+        if 'user' in question_lower:
+            collection = 'users' if 'users' in available_collections else available_collections[0]
+            intent = 'user_management'
+        elif 'cost' in question_lower or 'price' in question_lower or 'revenue' in question_lower:
+            collection = 'documents' if 'documents' in available_collections else available_collections[0]
+            intent = 'cost_analysis'
+        elif 'document' in question_lower or 'file' in question_lower:
+            collection = 'documents' if 'documents' in available_collections else available_collections[0]
+            intent = 'document_processing'
         else:
-            primary_intent = "performance_analysis"
-            required_collections = ["agent_activity"]
+            collection = available_collections[0] if available_collections else 'users'
+            intent = 'general_query'
+        
+        # Determine analysis type
+        if 'list' in question_lower or 'show' in question_lower:
+            analysis_type = 'list'
+        elif 'count' in question_lower or 'how many' in question_lower:
+            analysis_type = 'count'
+        elif 'compare' in question_lower or 'analysis' in question_lower:
+            analysis_type = 'aggregate'
+        else:
+            analysis_type = 'list'
         
         return {
-            "primary_intent": primary_intent,
-            "required_collections": required_collections,
-            "time_sensitivity": "recent",
-            "complexity_level": "simple_query",
-            "expected_output": "trend_analysis",
-            "key_entities": [],
-            "suggested_chart_type": "bar"
+            "primary_intent": intent,
+            "target_collection": collection,
+            "analysis_type": analysis_type,
+            "time_filter": "all",
+            "visualization_needed": False,
+            "confidence": 0.5,
+            "reasoning": f"Fallback intent for question: {question}"
         }
     
     async def generate_mongo_query(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Node 2: Generate MongoDB aggregation pipeline based on intent
-        
-        Uses the interpreted intent to create an optimized MongoDB query
-        that will retrieve the necessary data for analysis.
+        Enhanced MongoDB query generation with validation and fallbacks
         
         Args:
             state: Current workflow state with interpreted_intent
             
         Returns:
-            Updated state with mongo_query
+            Updated state with mongo_query configuration
         """
         try:
             state["current_step"] = "generating_query"
             intent = state.get("interpreted_intent", {})
             
-            logger.info(f"🔍 Generating MongoDB query for {intent.get('primary_intent')}")
+            logger.info(f"🔍 Generating MongoDB query for intent: {intent.get('primary_intent', 'unknown')}")
             
-            # Use your existing enhanced Gemini client for query generation
-            query_prompt = f"""
-            Generate MongoDB aggregation pipeline for this analytics request:
+            if not intent:
+                raise Exception("No intent data available for query generation")
             
-            Original Question: "{state['original_question']}"
-            Intent: {intent.get('primary_intent')}
-            Required Collections: {intent.get('required_collections', [])}
-            Expected Output: {intent.get('expected_output')}
+            collection = intent.get("target_collection", "users")
+            analysis_type = intent.get("analysis_type", "list")
             
-            Available Collections Schema:
-            {json.dumps(self.schema_info.get('collections', {}), indent=2)}
-            
-            Generate an optimized MongoDB aggregation pipeline that:
-            1. Uses the most appropriate collection from: {intent.get('required_collections', [])}
-            2. Includes proper filtering and grouping
-            3. Limits results to avoid overwhelming responses
-            4. Includes relevant sorting
-            
-            Respond with JSON:
-            {{
-                "collection": "collection_name",
-                "pipeline": [
-                    {{"$match": {{}}}},
-                    {{"$group": {{}}}},
-                    {{"$sort": {{}}}},
-                    {{"$limit": 50}}
-                ]
-            }}
-            """
-            
-            # Generate query using existing client
-            if hasattr(self.gemini_client, 'generate_content_async'):
-                response = await self.gemini_client.generate_content_async(query_prompt)
-            else:
-                response = self.gemini_client.generate_content(query_prompt)
-            
-            response_text = response.text if hasattr(response, 'text') else str(response)
-            
-            # Parse MongoDB query from response
+            # Validate collection exists
             try:
-                import re
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    query_data = json.loads(json_match.group())
+                if self.db is not None:
+                    available_collections = self.db.list_collection_names()
+                    if collection not in available_collections:
+                        logger.warning(f"Collection '{collection}' not found in {available_collections}")
+                        # Use first available collection as fallback
+                        collection = available_collections[0] if available_collections else "users"
+                        logger.info(f"Using fallback collection: {collection}")
                 else:
-                    # Fallback query generation
-                    query_data = self._fallback_query_generation(intent)
-            except json.JSONDecodeError:
-                query_data = self._fallback_query_generation(intent)
+                    logger.warning("Database not available - using default collection")
+                    
+            except Exception as e:
+                logger.warning(f"Could not validate collection: {e}")
             
-            state["mongo_query"] = query_data
+            # Generate appropriate MongoDB query based on analysis type
+            if analysis_type == "list":
+                mongo_query = {
+                    "collection": collection,
+                    "operation": "find",
+                    "query": {},
+                    "limit": 10,
+                    "sort": {"_id": -1},
+                    "projection": {}  # Get all fields
+                }
+                
+            elif analysis_type == "count":
+                mongo_query = {
+                    "collection": collection,
+                    "operation": "count_documents",
+                    "query": {}
+                }
+                
+            elif analysis_type == "aggregate":
+                mongo_query = {
+                    "collection": collection,
+                    "operation": "aggregate",
+                    "pipeline": [
+                        {"$group": {"_id": None, "total_count": {"$sum": 1}}},
+                        {"$limit": 1}
+                    ]
+                }
+                
+            elif analysis_type == "trend":
+                mongo_query = {
+                    "collection": collection,
+                    "operation": "aggregate",
+                    "pipeline": [
+                        {"$sort": {"createdAt": -1}},
+                        {"$limit": 20}
+                    ]
+                }
+                
+            else:
+                # Default fallback
+                mongo_query = {
+                    "collection": collection,
+                    "operation": "find",
+                    "query": {},
+                    "limit": 5
+                }
+            
+            state["mongo_query"] = mongo_query
             state["current_step"] = "query_generated"
             
-            logger.info(f"✅ Query generated for collection: {query_data.get('collection')}")
+            logger.info(f"✅ MongoDB query generated successfully")
+            logger.debug(f"Query details: {mongo_query}")
+            
             return state
             
         except Exception as e:
             logger.error(f"❌ Query generation failed: {e}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            
             state["errors"].append(f"Query generation failed: {str(e)}")
-            state["retry_count"] += 1
-            state["current_step"] = "query_failed"
+            state["current_step"] = "query_generation_failed"
+            
             return state
-    
-    def _fallback_query_generation(self, intent: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate fallback MongoDB query based on intent"""
-        collections = intent.get('required_collections', ['users'])
-        primary_collection = collections[0] if collections else 'users'
-        
-        # Simple fallback queries for different intents
-        if intent.get('primary_intent') == 'cost_analysis':
-            return {
-                "collection": "costevalutionforllm",
-                "pipeline": [
-                    {"$limit": 50},
-                    {"$sort": {"totalCostInUSD": -1}}
-                ]
-            }
-        elif intent.get('primary_intent') == 'user_management':
-            return {
-                "collection": "users",
-                "pipeline": [
-                    {"$limit": 50},
-                    {"$sort": {"createdAt": -1}}
-                ]
-            }
-        else:
-            return {
-                "collection": primary_collection,
-                "pipeline": [
-                    {"$limit": 50}
-                ]
-            }
     
     async def execute_data_query(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Node 3: Execute the MongoDB query and retrieve data
-        
-        Executes the generated query against your MongoDB collections
-        and handles any database-level errors or optimizations.
+        Enhanced data query execution with comprehensive error handling
         
         Args:
             state: Current workflow state with mongo_query
             
         Returns:
-            Updated state with raw_data
+            Updated state with raw_data results
         """
         try:
             state["current_step"] = "executing_query"
-            query_data = state.get("mongo_query", {})
+            query_config = state.get("mongo_query", {})
             
-            if not query_data:
-                raise ValueError("No MongoDB query available for execution")
+            logger.info(f"💾 Executing MongoDB query")
+            logger.debug(f"Query config: {query_config}")
             
-            collection_name = query_data.get("collection")
-            pipeline = query_data.get("pipeline", [])
+            if not query_config:
+                raise Exception("No MongoDB query configuration available")
             
-            logger.info(f"💾 Executing query on collection: {collection_name}")
+            if not self.db:
+                raise Exception("Database connection not available")
             
-            if self.db is None:
-                raise ValueError("Database connection not available")
+            collection_name = query_config.get("collection")
+            operation = query_config.get("operation", "find")
             
-            # Execute the aggregation pipeline
-            collection = self.db[collection_name]
+            if not collection_name:
+                raise Exception("No collection specified in query config")
             
-            # Convert any string dates to datetime objects if needed
-            processed_pipeline = self._process_pipeline_dates(pipeline)
+            # Get collection with validation
+            try:
+                collection = self.db[collection_name]
+                
+                # Test collection access
+                collection.find_one()
+                logger.debug(f"Collection '{collection_name}' accessible")
+                
+            except Exception as e:
+                raise Exception(f"Cannot access collection '{collection_name}': {e}")
             
-            # Execute query
-            cursor = collection.aggregate(processed_pipeline)
-            raw_results = list(cursor)
+            # Execute query based on operation type
+            raw_data = []
             
-            # Clean results for JSON serialization
-            cleaned_results = []
-            for result in raw_results:
-                cleaned_result = self._clean_mongodb_result(result)
-                cleaned_results.append(cleaned_result)
+            if operation == "find":
+                query = query_config.get("query", {})
+                limit = query_config.get("limit", 10)
+                sort_config = query_config.get("sort", {})
+                projection = query_config.get("projection", {})
+                
+                logger.debug(f"Executing find: query={query}, limit={limit}")
+                
+                cursor = collection.find(query, projection).limit(limit)
+                if sort_config:
+                    cursor = cursor.sort(list(sort_config.items()))
+                
+                raw_data = list(cursor)
+                
+            elif operation == "count_documents":
+                query = query_config.get("query", {})
+                count = collection.count_documents(query)
+                raw_data = [{"count": count, "collection": collection_name}]
+                
+            elif operation == "aggregate":
+                pipeline = query_config.get("pipeline", [])
+                logger.debug(f"Executing aggregation: {pipeline}")
+                raw_data = list(collection.aggregate(pipeline))
+                
+            else:
+                raise Exception(f"Unsupported operation: {operation}")
             
-            state["raw_data"] = cleaned_results
-            state["current_step"] = "data_retrieved"
+            # Convert ObjectId and other MongoDB types to JSON-serializable format
+            cleaned_data = self._clean_mongodb_data(raw_data)
             
-            logger.info(f"✅ Retrieved {len(cleaned_results)} records from {collection_name}")
+            state["raw_data"] = cleaned_data
+            state["current_step"] = "query_executed"
+            
+            logger.info(f"✅ Query executed successfully: {len(cleaned_data)} results from {collection_name}")
+            
+            if not cleaned_data:
+                logger.warning("Query returned no results - this may be expected")
+                state["errors"].append(f"Query returned no results from {collection_name}")
+            
             return state
             
         except Exception as e:
-            logger.error(f"❌ Data query execution failed: {e}")
-            state["errors"].append(f"Database query failed: {str(e)}")
-            state["retry_count"] += 1
-            state["current_step"] = "query_execution_failed"
+            logger.error(f"❌ Query execution failed: {e}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            
+            state["errors"].append(f"Query execution failed: {str(e)}")
+            state["current_step"] = "execution_failed"
+            
             return state
     
-    def _process_pipeline_dates(self, pipeline: List[Dict]) -> List[Dict]:
-        """Process pipeline to handle date conversions"""
-        # Reuse your existing date processing logic from perfected_processor.py
-        from datetime import datetime
-        import re
-        
-        def convert_dates_recursive(obj):
-            if isinstance(obj, dict):
-                return {key: convert_dates_recursive(value) for key, value in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_dates_recursive(item) for item in obj]
-            elif isinstance(obj, str):
-                if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', obj):
-                    try:
-                        return datetime.fromisoformat(obj.replace('Z', '+00:00'))
-                    except ValueError:
-                        return obj
-                return obj
-            else:
-                return obj
-        
-        return convert_dates_recursive(pipeline)
-    
-    def _clean_mongodb_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """Clean MongoDB result for JSON serialization"""
-        from bson import ObjectId
-        import math
-        
-        cleaned = {}
-        for key, value in result.items():
-            if isinstance(value, ObjectId):
-                cleaned[key] = str(value)
-            elif isinstance(value, datetime):
-                cleaned[key] = value.isoformat()
-            elif isinstance(value, dict):
-                cleaned[key] = self._clean_mongodb_result(value)
-            elif isinstance(value, float) and math.isnan(value):
-                cleaned[key] = None
-            else:
-                cleaned[key] = value
-        
-        return cleaned
+    def _clean_mongodb_data(self, raw_data: List[Dict]) -> List[Dict]:
+        """Clean MongoDB data for JSON serialization"""
+        try:
+            cleaned_data = []
+            
+            for item in raw_data:
+                if isinstance(item, dict):
+                    cleaned_item = {}
+                    for key, value in item.items():
+                        # Convert ObjectId to string
+                        if hasattr(value, '__class__') and 'ObjectId' in str(value.__class__):
+                            cleaned_item[key] = str(value)
+                        elif isinstance(value, datetime):
+                            cleaned_item[key] = value.isoformat()
+                        elif isinstance(value, (int, float, str, bool)) or value is None:
+                            cleaned_item[key] = value
+                        else:
+                            # Convert other types to string
+                            cleaned_item[key] = str(value)
+                    
+                    cleaned_data.append(cleaned_item)
+                else:
+                    # Handle non-dict items
+                    cleaned_data.append(str(item))
+            
+            return cleaned_data
+            
+        except Exception as e:
+            logger.error(f"Data cleaning failed: {e}")
+            return raw_data  # Return as-is if cleaning fails
     
     async def plan_visualization(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Node 4: Determine best chart type and formatting for the data
-        
-        Analyzes the retrieved data and the original intent to determine
-        the most appropriate visualization approach.
+        Enhanced visualization planning with intelligent chart selection
         
         Args:
             state: Current workflow state with raw_data
@@ -402,111 +461,121 @@ class AnalyticsWorkflowNodes:
         """
         try:
             state["current_step"] = "planning_visualization"
-            raw_data = state.get("raw_data", [])
+            
             intent = state.get("interpreted_intent", {})
+            raw_data = state.get("raw_data", [])
             
-            if not raw_data:
-                logger.warning("No data available for visualization planning")
-                state["chart_config"] = {"type": "table", "message": "No data found"}
-                state["current_step"] = "visualization_planned"
-                return state
+            logger.info(f"📊 Planning visualization for {len(raw_data)} data points")
             
-            logger.info(f"📊 Planning visualization for {len(raw_data)} records")
+            # Determine appropriate chart type
+            analysis_type = intent.get("analysis_type", "list")
+            data_count = len(raw_data)
             
-            # Analyze data structure
-            sample_record = raw_data[0] if raw_data else {}
-            data_fields = list(sample_record.keys())
-            
-            # Determine best chart type based on intent and data structure
-            suggested_chart = intent.get('suggested_chart_type', 'bar')
-            
-            # Smart chart type selection based on data
-            if len(data_fields) == 2:
-                # Two fields - good for bar charts or pie charts
-                chart_type = "bar" if any(field in ['count', 'total', 'sum'] for field in data_fields) else "pie"
-            elif any(field in ['date', 'time', 'createdAt', 'updatedAt'] for field in data_fields):
-                # Time-based data - line chart
-                chart_type = "line"
-            elif len(raw_data) > 20:
-                # Large datasets - table view
-                chart_type = "table"
+            if data_count == 0:
+                chart_config = {
+                    "chart_type": "empty",
+                    "message": "No data available for visualization",
+                    "show_table": False
+                }
+                
+            elif analysis_type == "count":
+                chart_config = {
+                    "chart_type": "metric",
+                    "title": f"Total Count",
+                    "value": raw_data[0].get("count", 0) if raw_data else 0,
+                    "show_table": False
+                }
+                
+            elif analysis_type == "list":
+                chart_config = {
+                    "chart_type": "table",
+                    "title": f"Data from {intent.get('target_collection', 'database')}",
+                    "columns": self._extract_table_columns(raw_data),
+                    "show_table": True,
+                    "pagination": data_count > 10
+                }
+                
+            elif analysis_type in ["aggregate", "trend", "comparison"]:
+                chart_config = {
+                    "chart_type": "bar",
+                    "title": f"Analysis Results",
+                    "show_table": True,
+                    "interactive": True
+                }
+                
             else:
-                # Default to suggested type
-                chart_type = suggested_chart
-            
-            # Create chart configuration
-            chart_config = {
-                "type": chart_type,
-                "data": raw_data,
-                "labels": self._extract_labels(raw_data),
-                "values": self._extract_values(raw_data),
-                "title": f"Analytics: {state['original_question'][:50]}...",
-                "fields": data_fields,
-                "total_records": len(raw_data)
-            }
+                # Default table view
+                chart_config = {
+                    "chart_type": "table",
+                    "title": "Query Results",
+                    "columns": self._extract_table_columns(raw_data),
+                    "show_table": True
+                }
             
             state["chart_config"] = chart_config
             state["current_step"] = "visualization_planned"
             
-            logger.info(f"✅ Planned {chart_type} visualization with {len(raw_data)} data points")
+            logger.info(f"✅ Visualization planned: {chart_config.get('chart_type')} chart")
             return state
             
         except Exception as e:
             logger.error(f"❌ Visualization planning failed: {e}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            
+            # Fallback visualization
+            state["chart_config"] = {
+                "chart_type": "table",
+                "title": "Results",
+                "show_table": True,
+                "error": str(e)
+            }
+            
             state["errors"].append(f"Visualization planning failed: {str(e)}")
             state["current_step"] = "visualization_failed"
+            
             return state
     
-    def _extract_labels(self, data: List[Dict]) -> List[str]:
-        """Extract labels for chart visualization"""
-        if not data:
+    def _extract_table_columns(self, data: List[Dict]) -> List[Dict]:
+        """Extract table column configuration from data"""
+        if not data or not isinstance(data[0], dict):
             return []
         
-        # Find the most likely label field
-        sample = data[0]
-        label_candidates = ['name', 'label', '_id', 'id', 'type', 'category']
+        sample_record = data[0]
+        columns = []
         
-        for candidate in label_candidates:
-            if candidate in sample:
-                return [str(record.get(candidate, 'Unknown')) for record in data]
+        for field_name in sample_record.keys():
+            if field_name.startswith('_'):
+                continue  # Skip MongoDB internal fields
+                
+            column_config = {
+                "key": field_name,
+                "title": field_name.replace('_', ' ').title(),
+                "type": self._determine_field_type(sample_record[field_name])
+            }
+            columns.append(column_config)
         
-        # Fallback to first field
-        first_field = list(sample.keys())[0] if sample else 'unknown'
-        return [str(record.get(first_field, 'Unknown')) for record in data]
+        return columns
     
-    def _extract_values(self, data: List[Dict]) -> List[Any]:
-        """Extract values for chart visualization"""
-        if not data:
-            return []
-        
-        # Find the most likely value field
-        sample = data[0]
-        value_candidates = ['value', 'count', 'total', 'amount', 'sum', 'avg', 'score']
-        
-        for candidate in value_candidates:
-            if candidate in sample and isinstance(sample[candidate], (int, float)):
-                return [record.get(candidate, 0) for record in data]
-        
-        # Fallback to first numeric field
-        for field, value in sample.items():
-            if isinstance(value, (int, float)):
-                return [record.get(field, 0) for record in data]
-        
-        # Final fallback - count occurrences
-        return [1] * len(data)
+    def _determine_field_type(self, value) -> str:
+        """Determine field type for table formatting"""
+        if isinstance(value, (int, float)):
+            return "number"
+        elif isinstance(value, bool):
+            return "boolean"
+        elif isinstance(value, datetime):
+            return "date"
+        else:
+            return "text"
     
     async def format_final_response(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Node 5: Format the final response for the frontend
-        
-        Combines all processed data into a response format that matches
-        your existing API expectations.
+        Enhanced final response formatting with insights and recommendations
         
         Args:
             state: Current workflow state with all processing complete
             
         Returns:
-            Updated state with final_result and success=True
+            Updated state with final_result and success status
         """
         try:
             state["current_step"] = "formatting_response"
@@ -514,16 +583,20 @@ class AnalyticsWorkflowNodes:
             chart_config = state.get("chart_config", {})
             raw_data = state.get("raw_data", [])
             intent = state.get("interpreted_intent", {})
+            errors = state.get("errors", [])
             
-            # Generate insights and recommendations
-            insights = self._generate_insights(raw_data, intent)
-            recommendations = self._generate_recommendations(raw_data, intent)
+            logger.info(f"📝 Formatting final response for {len(raw_data)} results")
             
-            # Format final response matching your existing API structure
+            # Generate basic insights
+            insights = self._generate_basic_insights(raw_data, intent)
+            recommendations = self._generate_basic_recommendations(raw_data, intent)
+            
+            # Create comprehensive response
             final_response = {
-                "success": True,
-                "summary": f"Analytics completed for: {state['original_question']}",
+                "success": len(errors) == 0,
+                "summary": self._generate_summary(state),
                 "chart_data": chart_config,
+                "raw_data": raw_data,
                 "insights": insights,
                 "recommendations": recommendations,
                 "results_count": len(raw_data),
@@ -531,169 +604,150 @@ class AnalyticsWorkflowNodes:
                 "ai_powered": True,
                 "workflow_enhanced": True,
                 
-                # LangGraph-specific metadata
+                # Workflow metadata
                 "workflow_metadata": {
                     "thread_id": state.get("thread_id"),
                     "steps_completed": state["current_step"],
                     "retry_count": state.get("retry_count", 0),
-                    "processing_time": (datetime.now() - state.get("start_time", datetime.now())).total_seconds() if state.get("start_time") else 0,
+                    "errors": errors,
                     "intent_detected": intent.get("primary_intent"),
-                    "collections_used": [state.get("mongo_query", {}).get("collection")]
+                    "target_collection": intent.get("target_collection"),
+                    "processing_time": (datetime.now() - state.get("start_time", datetime.now())).total_seconds() if state.get("start_time") else 0
                 }
             }
             
+            # Handle errors gracefully
+            if errors:
+                final_response["success"] = False
+                final_response["summary"] = f"Query completed with {len(errors)} warnings"
+                logger.warning(f"Response generated with {len(errors)} errors")
+            
             state["final_result"] = final_response
-            state["success"] = True
+            state["success"] = len(errors) == 0
             state["current_step"] = "completed"
             
-            logger.info(f"✅ Response formatted successfully for {state['original_question']}")
+            logger.info(f"✅ Response formatted successfully: {final_response['success']}")
             return state
             
         except Exception as e:
             logger.error(f"❌ Response formatting failed: {e}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            
+            # Create minimal error response
+            error_response = {
+                "success": False,
+                "summary": f"Response formatting failed: {str(e)}",
+                "error": str(e),
+                "query_source": "langgraph_workflow_error",
+                "workflow_metadata": {
+                    "errors": state.get("errors", []) + [str(e)]
+                }
+            }
+            
+            state["final_result"] = error_response
+            state["success"] = False
             state["errors"].append(f"Response formatting failed: {str(e)}")
             state["current_step"] = "formatting_failed"
+            
             return state
     
-    def _generate_insights(self, data: List[Dict], intent: Dict) -> List[str]:
-        """Generate insights based on the data and intent"""
-        if not data:
-            return ["No data available for analysis"]
+    def _generate_summary(self, state: Dict[str, Any]) -> str:
+        """Generate summary based on workflow state"""
+        intent = state.get("interpreted_intent", {})
+        raw_data = state.get("raw_data", [])
+        errors = state.get("errors", [])
         
-        insights = []
-        data_count = len(data)
-        
-        # Generic insights
-        insights.append(f"Found {data_count} records matching your query")
-        
-        # Intent-specific insights
-        primary_intent = intent.get("primary_intent", "")
-        
-        if primary_intent == "cost_analysis":
-            # Analyze costs
-            cost_fields = ['totalCostInUSD', 'cost', 'amount']
-            for field in cost_fields:
-                if field in (data[0] if data else {}):
-                    total_cost = sum(float(record.get(field, 0)) for record in data)
-                    avg_cost = total_cost / data_count if data_count > 0 else 0
-                    insights.append(f"Total cost: ${total_cost:.2f}, Average: ${avg_cost:.2f}")
-                    break
-        
-        elif primary_intent == "user_management":
-            # Analyze users
-            roles = set(record.get('role', 'Unknown') for record in data)
-            insights.append(f"Found users with roles: {', '.join(roles)}")
-        
-        elif primary_intent == "document_processing":
-            # Analyze document processing
-            if 'status' in (data[0] if data else {}):
-                statuses = {}
-                for record in data:
-                    status = record.get('status', 'Unknown')
-                    statuses[status] = statuses.get(status, 0) + 1
-                insights.append(f"Document statuses: {dict(statuses)}")
-        
-        # Add more insights based on data patterns
-        if data_count > 10:
-            insights.append("Large dataset detected - consider filtering for better performance")
-        
-        return insights[:5]  # Limit to 5 insights
+        if errors:
+            return f"Query processed with {len(errors)} issues. Found {len(raw_data)} results from {intent.get('target_collection', 'database')}."
+        else:
+            return f"Successfully analyzed {intent.get('primary_intent', 'query')}. Found {len(raw_data)} results from {intent.get('target_collection', 'database')}."
     
-    def _generate_recommendations(self, data: List[Dict], intent: Dict) -> List[str]:
-        """Generate recommendations based on the analysis"""
+    def _generate_basic_insights(self, data: List[Dict], intent: Dict) -> List[str]:
+        """Generate basic insights from data"""
+        insights = []
+        
         if not data:
-            return ["Try a different query or check data availability"]
+            insights.append("No data found for the specified query")
+            return insights
         
+        data_count = len(data)
+        insights.append(f"Retrieved {data_count} records from {intent.get('target_collection', 'database')}")
+        
+        if data_count > 0 and isinstance(data[0], dict):
+            field_count = len(data[0].keys())
+            insights.append(f"Each record contains {field_count} fields")
+        
+        return insights
+    
+    def _generate_basic_recommendations(self, data: List[Dict], intent: Dict) -> List[str]:
+        """Generate basic recommendations"""
         recommendations = []
-        primary_intent = intent.get("primary_intent", "")
         
-        if primary_intent == "cost_analysis":
-            recommendations.extend([
-                "Monitor high-cost operations for optimization opportunities",
-                "Consider setting up cost alerts for budget management",
-                "Analyze cost trends over time to identify patterns"
-            ])
+        if not data:
+            recommendations.append("Consider checking if the collection contains data")
+            recommendations.append("Verify the query criteria are correct")
+        else:
+            recommendations.append("Data retrieved successfully")
+            if len(data) >= 10:
+                recommendations.append("Consider adding filters to narrow down results")
         
-        elif primary_intent == "user_management":
-            recommendations.extend([
-                "Review user access permissions regularly",
-                "Consider role-based access control optimization",
-                "Monitor user activity for security purposes"
-            ])
-        
-        elif primary_intent == "document_processing":
-            recommendations.extend([
-                "Focus on improving low-confidence extractions",
-                "Consider batch processing for efficiency",
-                "Monitor processing success rates regularly"
-            ])
-        
-        # Generic recommendations
-        recommendations.append("Use filters to narrow down results for specific insights")
-        recommendations.append("Consider exporting data for detailed offline analysis")
-        
-        return recommendations[:5]  # Limit to 5 recommendations
-
+        return recommendations
+    
     async def handle_error_recovery(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Error recovery node that attempts to fix common issues
+        Enhanced error recovery with intelligent retry logic
         
         Args:
             state: Current workflow state with errors
             
         Returns:
-            Updated state with recovery attempt
+            Updated state with recovery actions
         """
         try:
-            state["current_step"] = "recovering_from_error"
+            state["current_step"] = "handling_error"
             errors = state.get("errors", [])
             retry_count = state.get("retry_count", 0)
             
-            logger.info(f"🔄 Attempting error recovery (attempt {retry_count + 1})")
+            logger.info(f"🔄 Handling error recovery: {len(errors)} errors, retry #{retry_count}")
             
             if retry_count >= 3:
-                # Max retries reached, format error response
-                state["final_result"] = {
-                    "success": False,
-                    "error": "Maximum retries exceeded",
-                    "errors": errors,
-                    "summary": f"Unable to process query: {state['original_question']}",
-                    "suggestions": [
-                        "Try simplifying your question",
-                        "Check if the requested data exists",
-                        "Use more specific terms in your query"
-                    ]
-                }
+                logger.warning("Maximum retries reached - ending workflow")
                 state["success"] = False
-                state["current_step"] = "error_final"
+                state["current_step"] = "max_retries_reached"
                 return state
             
-            # Attempt to recover based on error type
-            last_error = errors[-1] if errors else ""
+            # Increment retry count
+            state["retry_count"] = retry_count + 1
             
-            if "query generation" in last_error.lower():
-                # Reset to intent understanding with modified approach
-                state["current_step"] = "recovery_intent"
+            # Analyze error types for intelligent recovery
+            has_gemini_error = any("Gemini" in error for error in errors)
+            has_db_error = any("MongoDB" in error or "collection" in error.lower() for error in errors)
+            has_intent_error = any("intent" in error.lower() for error in errors)
+            
+            # Determine recovery strategy
+            if has_intent_error or has_gemini_error:
+                logger.info("🔄 Retrying from intent understanding")
+                state["current_step"] = "retry_intent"
+                # Clear intent to force regeneration
                 state["interpreted_intent"] = None
                 
-            elif "database query" in last_error.lower():
-                # Try with a simpler query
-                if state.get("mongo_query"):
-                    query = state["mongo_query"]
-                    query["pipeline"] = [{"$limit": 10}]  # Simplify to basic query
-                state["current_step"] = "recovery_query"
+            elif has_db_error:
+                logger.info("🔄 Retrying query execution")
+                state["current_step"] = "retry_execute"
                 
             else:
-                # Generic recovery - restart from intent
-                state["current_step"] = "recovery_restart"
-                state["interpreted_intent"] = None
-                state["mongo_query"] = None
+                logger.info("🔄 Generic retry - starting from query generation")
+                state["current_step"] = "retry_query"
             
-            logger.info(f"🔄 Recovery strategy: {state['current_step']}")
+            # Clear previous errors for retry
+            state["errors"] = [f"Retry #{retry_count + 1} initiated"]
+            
+            logger.info(f"✅ Error recovery strategy determined: {state['current_step']}")
             return state
             
         except Exception as e:
             logger.error(f"❌ Error recovery failed: {e}")
-            state["errors"].append(f"Recovery failed: {str(e)}")
+            state["errors"].append(f"Error recovery failed: {str(e)}")
+            state["success"] = False
             state["current_step"] = "recovery_failed"
             return state
