@@ -244,7 +244,8 @@ class PerfectedTwoStageProcessor:
         return fuzzy_pipeline
     
     def _clean_mongodb_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """Clean MongoDB result by converting ObjectIds to strings"""
+        """Clean MongoDB result by converting ObjectIds to strings and handling NaN values"""
+        import math
         cleaned = {}
         
         for key, value in result.items():
@@ -254,6 +255,8 @@ class PerfectedTwoStageProcessor:
                 cleaned[key] = value.isoformat()
             elif isinstance(value, dict):
                 cleaned[key] = self._clean_mongodb_result(value)
+            elif isinstance(value, float) and math.isnan(value):
+                cleaned[key] = None  # Convert NaN to null for JSON compatibility
             else:
                 cleaned[key] = value
         
