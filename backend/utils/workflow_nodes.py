@@ -252,6 +252,7 @@ class EnhancedAnalyticsWorkflowNodes:
         try:
             state["current_step"] = "generating_query"
             intent = state.get("interpreted_intent", {})
+            original_question = state.get("original_question", "")
             
             logger.info(f"🔍 Generating MongoDB query for intent: {intent.get('primary_intent', 'unknown')}")
             
@@ -260,6 +261,13 @@ class EnhancedAnalyticsWorkflowNodes:
             
             collection = intent.get("target_collection", "users")
             analysis_type = intent.get("analysis_type", "list")
+            
+            # Override collection for user-related questions
+            question_lower = original_question.lower()
+            if any(word in question_lower for word in ['user', 'users', 'admin', 'role']):
+                if 'users' in self.db.list_collection_names() if self.db is not None else True:
+                    collection = "users"
+                    logger.info(f"🔧 Overrode collection to 'users' for user-related question")
             
             # Validate collection exists
             try:
@@ -288,10 +296,12 @@ class EnhancedAnalyticsWorkflowNodes:
                 }
                 
             elif analysis_type == "count":
+                # Generate smart filter for count queries
+                count_filter = self._generate_smart_count_filter(original_question, collection)
                 mongo_query = {
                     "collection": collection,
-                    "operation": "count_documents",
-                    "query": {}
+                    "operation": "count_documents", 
+                    "query": count_filter
                 }
                 
             elif analysis_type == "aggregate":
@@ -327,6 +337,7 @@ class EnhancedAnalyticsWorkflowNodes:
             state["current_step"] = "query_generated"
             
             logger.info(f"✅ MongoDB query generated successfully")
+            logger.info(f"🔍 GENERATED QUERY DEBUG: operation={mongo_query.get('operation')}, query={mongo_query.get('query')}")
             logger.debug(f"Query details: {mongo_query}")
             
             return state
@@ -355,6 +366,7 @@ class EnhancedAnalyticsWorkflowNodes:
             query_config = state.get("mongo_query", {})
             
             logger.info(f"💾 Executing MongoDB query")
+            logger.info(f"🔍 EXECUTION QUERY DEBUG: operation={query_config.get('operation')}, query={query_config.get('query')}")
             logger.debug(f"Query config: {query_config}")
             
             if not query_config:
@@ -496,9 +508,14 @@ class EnhancedAnalyticsWorkflowNodes:
                 }
                 
             elif analysis_type == "count":
+                # Generate smart title based on question
+                original_question = state.get("original_question", "Query")
+                count_title = self._generate_count_title(original_question, intent.get('target_collection', 'records'))
                 chart_config = {
                     "chart_type": "metric",
-                    "title": f"Total Count",
+                    "type": "metric",  # Frontend compatibility  
+                    "chartType": "metric",  # Additional frontend compatibility
+                    "title": count_title,
                     "value": raw_data[0].get("count", 0) if raw_data else 0,
                     "show_table": False
                 }
@@ -620,8 +637,11 @@ class EnhancedAnalyticsWorkflowNodes:
             logger.info(f"📝 Formatting final response for {len(raw_data)} results")
             
             # Generate basic insights
-            insights = self._generate_basic_insights(raw_data, intent)
-            recommendations = self._generate_basic_recommendations(raw_data, intent)
+            # Pass the original question for context-specific insights
+            intent_with_question = intent.copy()
+            intent_with_question["original_question"] = state.get("original_question", "")
+            insights = self._generate_basic_insights(raw_data, intent_with_question)
+            recommendations = self._generate_basic_recommendations(raw_data, intent_with_question)
             
             # Create comprehensive response
             final_response = {
@@ -688,26 +708,52 @@ class EnhancedAnalyticsWorkflowNodes:
         intent = state.get("interpreted_intent", {})
         raw_data = state.get("raw_data", [])
         errors = state.get("errors", [])
+        analysis_type = intent.get("analysis_type", "list")
         
-        if errors:
-            return f"Query processed with {len(errors)} issues. Found {len(raw_data)} results from {intent.get('target_collection', 'database')}."
+        # Special handling for count queries
+        if analysis_type == "count" and raw_data and len(raw_data) == 1 and "count" in raw_data[0]:
+            count_value = raw_data[0].get("count", 0)
+            if errors:
+                return f"Query processed with {len(errors)} issues. Found {count_value} matching records."
+            else:
+                return f"Successfully analyzed {intent.get('primary_intent', 'query')}. Found {count_value} matching records."
         else:
-            return f"Successfully analyzed {intent.get('primary_intent', 'query')}. Found {len(raw_data)} results from {intent.get('target_collection', 'database')}."
+            if errors:
+                return f"Query processed with {len(errors)} issues. Found {len(raw_data)} results from {intent.get('target_collection', 'database')}."
+            else:
+                return f"Successfully analyzed {intent.get('primary_intent', 'query')}. Found {len(raw_data)} results from {intent.get('target_collection', 'database')}."
     
     def _generate_basic_insights(self, data: List[Dict], intent: Dict) -> List[str]:
         """Generate basic insights from data"""
         insights = []
+        analysis_type = intent.get("analysis_type", "list")
         
         if not data:
             insights.append("No data found for the specified query")
             return insights
         
-        data_count = len(data)
-        insights.append(f"Retrieved {data_count} records from {intent.get('target_collection', 'database')}")
-        
-        if data_count > 0 and isinstance(data[0], dict):
-            field_count = len(data[0].keys())
-            insights.append(f"Each record contains {field_count} fields")
+        # Special handling for count queries
+        if analysis_type == "count" and len(data) == 1 and "count" in data[0]:
+            count_value = data[0].get("count", 0)
+            collection = intent.get("target_collection", "database")
+            if count_value == 0:
+                insights.append(f"No matching records found in {collection}")
+            elif count_value == 1:
+                insights.append(f"Found 1 matching record in {collection}")
+            else:
+                insights.append(f"Found {count_value} matching records in {collection}")
+            
+            # Add context-specific insights for admin queries
+            original_question = intent.get("original_question", "").lower()
+            if "admin" in original_question:
+                insights.append(f"Admin users are actively configured in the system")
+        else:
+            data_count = len(data)
+            insights.append(f"Retrieved {data_count} records from {intent.get('target_collection', 'database')}")
+            
+            if data_count > 0 and isinstance(data[0], dict):
+                field_count = len(data[0].keys())
+                insights.append(f"Each record contains {field_count} fields")
         
         return insights
     
@@ -854,6 +900,82 @@ class EnhancedAnalyticsWorkflowNodes:
             "#EC4899", "#6366F1", "#14B8A6", "#F97316", "#84CC16"
         ]
         return [colors[i % len(colors)] for i in range(count)]
+    
+    def _generate_smart_count_filter(self, question: str, collection: str) -> Dict[str, Any]:
+        """Generate intelligent MongoDB filter for count queries based on question content"""
+        question_lower = question.lower()
+        filter_query = {}
+        
+        try:
+            # Admin role filtering
+            if 'admin' in question_lower:
+                # Try common admin field patterns
+                admin_patterns = [
+                    {"role": "admin"},
+                    {"role": "Admin"}, 
+                    {"userType": "admin"},
+                    {"userType": "Admin"},
+                    {"type": "admin"},
+                    {"isAdmin": True},
+                    {"permissions": {"$in": ["admin", "administrator"]}}
+                ]
+                
+                # Use exact match for better reliability - regex was causing issues
+                filter_query = {"role": "admin"}
+                logger.info(f"🔍 Generated admin filter: {filter_query}")
+                
+            # Active/inactive filtering
+            elif any(word in question_lower for word in ['active', 'inactive', 'enabled', 'disabled']):
+                if 'active' in question_lower:
+                    filter_query = {"$or": [{"status": "active"}, {"active": True}, {"enabled": True}]}
+                else:
+                    filter_query = {"$or": [{"status": "inactive"}, {"active": False}, {"enabled": False}]}
+                logger.info(f"🔍 Generated status filter: {filter_query}")
+                
+            # Date-based filtering
+            elif any(word in question_lower for word in ['recent', 'new', 'this month', 'today']):
+                from datetime import datetime, timedelta
+                if 'recent' in question_lower or 'new' in question_lower:
+                    recent_date = datetime.now() - timedelta(days=30)
+                    filter_query = {"createdAt": {"$gte": recent_date}}
+                elif 'today' in question_lower:
+                    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                    filter_query = {"createdAt": {"$gte": today}}
+                logger.info(f"🔍 Generated date filter: {filter_query}")
+                
+            # If no specific filter detected, return empty (count all)
+            if not filter_query:
+                logger.info("🔍 No specific filter detected, counting all records")
+                
+        except Exception as e:
+            logger.error(f"Error generating count filter: {e}")
+            filter_query = {}  # Fallback to count all
+            
+        return filter_query
+    
+    def _generate_count_title(self, question: str, collection: str) -> str:
+        """Generate a meaningful title for count results based on the question"""
+        question_lower = question.lower()
+        
+        # Admin count titles
+        if 'admin' in question_lower:
+            return "Admin Users Count"
+        
+        # Active/inactive titles  
+        if 'active' in question_lower:
+            return "Active Users Count"
+        elif 'inactive' in question_lower:
+            return "Inactive Users Count"
+            
+        # Recent/new titles
+        if 'recent' in question_lower or 'new' in question_lower:
+            return "Recent Users Count"
+        elif 'today' in question_lower:
+            return "Users Today Count"
+        
+        # Default title based on collection
+        collection_name = collection.replace('_', ' ').title()
+        return f"Total {collection_name} Count"
     
     async def handle_error_recovery(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """

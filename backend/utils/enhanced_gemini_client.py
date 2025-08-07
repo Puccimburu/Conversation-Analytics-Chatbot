@@ -636,3 +636,49 @@ class BulletproofGeminiClient:
                 logger.error(f"Cleaned JSON string: {json_str}")
                 return None
         return None
+    
+    def _build_query_prompt(self, user_question: str, database_schema: Dict) -> str:
+        """Build intelligent prompt for MongoDB query generation using database schema"""
+        
+        # Extract collections and their schemas for context
+        collections_info = []
+        for collection_name, collection_data in database_schema.get("collections", {}).items():
+            fields = collection_data.get("fields", [])
+            description = collection_data.get("description", f"{collection_name} collection")
+            
+            collections_info.append(f"""
+Collection: {collection_name}
+Description: {description}
+Fields: {', '.join(fields)}""")
+        
+        collections_text = '\n'.join(collections_info)
+        
+        prompt = f"""You are a MongoDB query expert. Generate a MongoDB aggregation pipeline based on the user's question.
+
+DATABASE SCHEMA:
+{collections_text}
+
+USER QUESTION: {user_question}
+
+IMPORTANT INSTRUCTIONS:
+1. Choose the most appropriate collection based on the question keywords
+2. For user-related questions, use the "users" collection
+3. For admin queries, filter by role field: {{"role": {{"$regex": "admin", "$options": "i"}}}}
+4. Use aggregation pipeline format with proper MongoDB operators
+5. Include proper filtering, grouping, and sorting as needed
+
+RESPONSE FORMAT (JSON only):
+{{
+    "intent": "description of what user wants",
+    "collection": "collection_name", 
+    "pipeline": [
+        {{"$match": {{"field": "criteria"}}}},
+        {{"$group": {{"_id": "$field", "count": {{"$sum": 1}}}}}},
+        {{"$sort": {{"count": -1}}}},
+        {{"$limit": 50}}
+    ]
+}}
+
+Generate the query now:"""
+        
+        return prompt
